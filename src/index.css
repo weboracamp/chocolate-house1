@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-chocolate: #2b140e;
+    --color-chocolate-dark: #190a06;
+    --color-chocolate-light: #442217;
+    --color-chocolate-accent: #5e2f20;
+    --color-gold: #d4af37;
+    --color-gold-light: #f7e7a9;
+    --color-gold-dark: #b8911f;
+    --color-cream: #fffbf5;
+    --color-cream-card: #ffffff;
+    --color-cream-muted: #f4ecdf;
+    --color-cream-dark: #e8dccb;
+  }
+
+  body {
+    font-family: 'Outfit', 'Cairo', sans-serif;
+    background-color: var(--color-cream);
+    color: var(--color-chocolate);
+    overflow-x: hidden;
+  }
+
+  [dir="rtl"] body,
+  [dir="rtl"] {
+    font-family: 'Cairo', 'Outfit', sans-serif;
+  }
+}
+
+.font-serif-brand {
+  font-family: 'Playfair Display', 'Cinzel', serif;
+}
+
+.font-arabic-brand {
+  font-family: 'Cairo', sans-serif;
+}
+
+/* Custom scrollbar for modern cafe luxury feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-cream-muted);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-gold-dark);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gold);
+}
+
+/* Receipt Print Styling */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0 auto;
+    padding: 10px;
+    background: #fff;
+    color: #000;
+    font-family: monospace;
+    font-size: 12px;
+  }
+}
+
