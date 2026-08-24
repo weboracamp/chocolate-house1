@@ -52,14 +52,21 @@
   background: var(--color-gold);
 }
 
-/* Dedicated 80mm Thermal Receipt Print Styling */
+/* ==============================================================================
+   DEDICATED 80MM THERMAL RECEIPT PRINT STYLING
+   ==============================================================================
+   Fixes blank page print issues by ensuring #thermal-receipt-modal & #thermal-receipt-content
+   remain fully visible (visibility: visible, display: block), while clearing parent clipping,
+   overflow constraints, and background modal overlays.
+   ============================================================================== */
 @media print {
   @page {
     size: 80mm auto;
     margin: 0mm;
   }
 
-  html, body {
+  html,
+  body {
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
@@ -74,29 +81,61 @@
     print-color-adjust: exact !important;
   }
 
-  /* Hide all website elements, headers, footers, backdrop modals */
+  /* 1. Hide default page layout elements */
   body * {
-    visibility: hidden !important;
+    visibility: hidden;
   }
 
-  /* Only display the thermal receipt content */
+  /* 2. Make ancestor tree down to the receipt visible so the print renderer does not drop it */
+  #root,
+  #root > *,
+  #thermal-receipt-modal,
+  #thermal-receipt-modal *,
   #thermal-receipt-content,
-  #thermal-receipt-content *,
-  #printable-receipt,
-  #printable-receipt * {
+  #thermal-receipt-content * {
     visibility: visible !important;
   }
 
-  #thermal-receipt-content,
-  #printable-receipt {
-    position: absolute !important;
+  /* 3. Strip overlay backdrops and position receipt container at the top */
+  #thermal-receipt-modal {
+    position: fixed !important;
     left: 0 !important;
     top: 0 !important;
     width: 80mm !important;
     max-width: 80mm !important;
     min-width: 80mm !important;
-    margin: 0 auto !important;
-    padding: 4mm !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    display: block !important;
+    overflow: visible !important;
+    z-index: 999999 !important;
+  }
+
+  #thermal-receipt-modal > div {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  /* 4. Format thermal receipt content container for 80mm width paper roll */
+  #thermal-receipt-content {
+    position: static !important;
+    display: block !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    min-width: 80mm !important;
+    margin: 0 !important;
+    padding: 3mm 4mm !important;
     background: #ffffff !important;
     color: #000000 !important;
     font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif !important;
@@ -110,7 +149,22 @@
     box-shadow: none !important;
   }
 
-  /* Ensure page breaks do not create extra blank pages */
+  /* 5. Force elements marked with print:hidden or no-print to collapse and hide */
+  .print\:hidden,
+  .no-print,
+  header,
+  footer,
+  nav,
+  #cart-drawer,
+  #checkout-modal {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* 6. Prevent pagination breaks inside receipt sections */
   #thermal-receipt-content div,
   #thermal-receipt-content p,
   #thermal-receipt-content table,
@@ -122,8 +176,10 @@
     break-inside: avoid !important;
   }
 
-  /* Force images/QR to print sharply */
+  /* 7. Optimize QR code and images for thermal printing sharpness */
   #thermal-receipt-content img {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
     image-rendering: pixelated;
     display: block;
     margin-left: auto;

@@ -9,7 +9,10 @@ export const ReceiptModal: React.FC = () => {
   if (!activeReceiptOrder) return null;
 
   const order = activeReceiptOrder;
-  const storeGoogleMapsUrl = 'https://www.google.com/maps/search/?api=1&query=Chocolate+House+Salah+Salem+ST+Al+Hawamdeya+Giza';
+
+  // 1. Google Maps Store Location URL for QR Code generation (Exact URL requested)
+  const storeGoogleMapsUrl = 'https://maps.app.goo.gl/AxWMKsKdfzpvW4gv5?g_st=ic';
+  // Generates 150x150 QR code directly encoding the exact Google Maps URL
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=4&data=${encodeURIComponent(storeGoogleMapsUrl)}`;
 
   const handlePrint = () => {
@@ -17,9 +20,13 @@ export const ReceiptModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static">
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none">
-        {/* Top bar (Hidden when printing) */}
+    /* Outer Modal Container: Configured with id="thermal-receipt-modal" and print styles to prevent blank pages during window.print() */
+    <div
+      id="thermal-receipt-modal"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block"
+    >
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible">
+        {/* Top bar (Hidden when printing via .print:hidden) */}
         <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-[#D4AF37]" />
