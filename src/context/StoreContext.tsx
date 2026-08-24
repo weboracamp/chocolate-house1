@@ -23,6 +23,13 @@ import { INITIAL_FEATURES } from '../data/features';
 import { INITIAL_SITE_CONFIG, INITIAL_TESTIMONIALS, INITIAL_FAQS } from '../data/siteConfig';
 import { translations } from '../lib/i18n';
 import { supabase } from '../lib/supabase';
+import {
+  cachedSupabaseQuery,
+  cachedSupabaseMutations,
+  invalidateCache,
+  invalidateAllCache,
+  CACHE_TTL_CONFIG,
+} from '../lib/supabaseCache';
 import confetti from 'canvas-confetti';
 
 interface Toast {
@@ -262,34 +269,56 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ];
   });
 
-  // Fetch initial records from Supabase if connected
+  // Fetch initial records from Supabase via the Caching Layer (Reduces Supabase load)
   useEffect(() => {
     if (supabase) {
       const fetchInitialData = async () => {
         try {
-          // Fetch contact messages
-          const { data: messages, error: msgError } = await supabase
-            .from('contact_messages')
-            .select('*')
-            .order('created_at', { ascending: false });
+          // 1. Fetch contact messages through caching layer (TTL: 3 mins)
+          const { data: messages, fromCache: msgFromCache, error: msgError } = await cachedSupabaseQuery<ContactMessage[]>(
+            'contact_messages',
+            async () => {
+              const res = await supabase!
+                .from('contact_messages')
+                .select('*')
+                .order('created_at', { ascending: false });
+              return { data: res.data as ContactMessage[], error: res.error };
+            },
+            { table: 'contact_messages' }
+          );
+
           if (!msgError && messages && messages.length > 0) {
             setContactMessages(messages);
+            if (msgFromCache) {
+              console.info('[StoreContext] ⚡ Loaded contact_messages from client-side cache');
+            }
           }
         } catch (err) {
-          console.warn('Error loading contact_messages from Supabase:', err);
+          console.warn('Error loading contact_messages via cache:', err);
         }
 
         try {
-          // Fetch newsletter subscribers
-          const { data: subs, error: subError } = await supabase
-            .from('newsletter_subscribers')
-            .select('*')
-            .order('created_at', { ascending: false });
+          // 2. Fetch newsletter subscribers through caching layer (TTL: 5 mins)
+          const { data: subs, fromCache: subsFromCache, error: subError } = await cachedSupabaseQuery<NewsletterSubscriber[]>(
+            'newsletter_subscribers',
+            async () => {
+              const res = await supabase!
+                .from('newsletter_subscribers')
+                .select('*')
+                .order('created_at', { ascending: false });
+              return { data: res.data as NewsletterSubscriber[], error: res.error };
+            },
+            { table: 'newsletter_subscribers' }
+          );
+
           if (!subError && subs && subs.length > 0) {
             setNewsletterSubscribers(subs);
+            if (subsFromCache) {
+              console.info('[StoreContext] ⚡ Loaded newsletter_subscribers from client-side cache');
+            }
           }
         } catch (err) {
-          console.warn('Error loading newsletter_subscribers from Supabase:', err);
+          console.warn('Error loading newsletter_subscribers via cache:', err);
         }
       };
 
@@ -315,10 +344,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setContactMessages((prev) => [newMessage, ...prev]);
 
-    // Push to Supabase if configured
+    // Push to Supabase via mutation cache layer (automatically invalidates 'contact_messages' cache)
     if (supabase) {
       try {
-        await supabase.from('contact_messages').insert({
+        await cachedSupabaseMutations.insert('contact_messages', {
           name: messageData.name,
           phone: messageData.phone,
           email: messageData.email || null,
@@ -344,7 +373,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setContactMessages((prev) => prev.filter((m) => m.id !== id));
     if (supabase) {
       try {
-        await supabase.from('contact_messages').delete().eq('id', id);
+        // Automatically deletes and invalidates 'contact_messages' cache
+        await cachedSupabaseMutations.delete('contact_messages', id);
       } catch (err) {
         console.warn('Could not delete from Supabase contact_messages:', err);
       }
@@ -380,9 +410,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setNewsletterSubscribers((prev) => [newSubscriber, ...prev]);
 
+    // Push to Supabase via mutation cache layer (automatically invalidates 'newsletter_subscribers' cache)
     if (supabase) {
       try {
-        await supabase.from('newsletter_subscribers').insert({
+        await cachedSupabaseMutations.insert('newsletter_subscribers', {
           email: trimmed,
           is_active: true,
         });
@@ -404,7 +435,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== id));
     if (supabase) {
       try {
-        await supabase.from('newsletter_subscribers').delete().eq('id', id);
+        // Automatically deletes and invalidates 'newsletter_subscribers' cache
+        await cachedSupabaseMutations.delete('newsletter_subscribers', id);
       } catch (err) {
         console.warn('Could not delete from Supabase newsletter_subscribers:', err);
       }
@@ -449,6 +481,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `prod-${Date.now()}`,
     };
     setProducts((prev) => [product, ...prev]);
+    // Invalidate cached product queries so subsequent reads get fresh items
+    invalidateCache('products');
     showToast(language === 'ar' ? 'تمت إضافة الصنف بنجاح' : 'Product added successfully', 'success');
   };
 
@@ -456,11 +490,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setProducts((prev) =>
       prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
     );
+    // Invalidate cached product queries
+    invalidateCache('products');
     showToast(language === 'ar' ? 'تم تحديث بيانات الصنف' : 'Product updated successfully', 'success');
   };
 
   const deleteProduct = (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    // Invalidate cached product queries
+    invalidateCache('products');
     showToast(language === 'ar' ? 'تم حذف الصنف' : 'Product deleted', 'info');
   };
 
@@ -658,6 +696,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearCart();
     setActiveReceiptOrder(newOrder);
 
+    // Invalidate orders and products cache
+    invalidateCache('orders');
+    invalidateCache('products');
+
     // Fire celebratory confetti!
     try {
       confetti({
@@ -684,6 +726,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, status } : o))
     );
+    invalidateCache('orders');
     showToast(
       language === 'ar'
         ? `تم تحديث حالة الطلب إلى "${translations.ar[status]}"`
@@ -718,6 +761,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       created_at: new Date().toISOString(),
     };
     setExpenses((prev) => [expense, ...prev]);
+    invalidateCache('expenses');
     showToast(
       language === 'ar'
         ? `تم تسجيل المصروف بقيمة ${expense.amount} ج.م`
@@ -785,6 +829,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     setShiftReports((prev) => [report, ...prev]);
+    invalidateCache('shift_reports');
 
     // Reset cashier daily view
     const nowIso = new Date().toISOString();
