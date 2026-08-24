@@ -9,9 +9,20 @@ import {
   Language,
   CategoryType,
   OrderStatus,
+  FeatureItem,
+  ActiveViewType,
+  SiteConfig,
+  Testimonial,
+  FAQItem,
+  ContactInquiry,
+  ContactMessage,
+  NewsletterSubscriber,
 } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
+import { INITIAL_FEATURES } from '../data/features';
+import { INITIAL_SITE_CONFIG, INITIAL_TESTIMONIALS, INITIAL_FAQS } from '../data/siteConfig';
 import { translations } from '../lib/i18n';
+import { supabase } from '../lib/supabase';
 import confetti from 'canvas-confetti';
 
 interface Toast {
@@ -29,6 +40,24 @@ interface StoreContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: typeof translations.en;
+  
+  // Dynamic Site Config & Content
+  siteConfig: SiteConfig;
+  features: FeatureItem[];
+  testimonials: Testimonial[];
+  faqs: FAQItem[];
+  
+  // Contact Messages & Inquiries
+  contactMessages: ContactMessage[];
+  contactInquiries: ContactInquiry[];
+  submitContactInquiry: (inquiry: Omit<ContactInquiry, 'id' | 'created_at' | 'status'>) => boolean;
+  submitContactMessage: (message: Omit<ContactMessage, 'id' | 'created_at'>) => Promise<boolean>;
+  deleteContactMessage: (id: string) => void;
+
+  // Newsletter Subscribers
+  newsletterSubscribers: NewsletterSubscriber[];
+  subscribeNewsletter: (email: string) => Promise<boolean>;
+  deleteNewsletterSubscriber: (id: string) => void;
   
   // Products
   products: Product[];
@@ -84,8 +113,8 @@ interface StoreContextType {
   setIsCartOpen: (open: boolean) => void;
   isCheckoutOpen: boolean;
   setIsCheckoutOpen: (open: boolean) => void;
-  activeView: 'store' | 'cashier' | 'owner';
-  setActiveView: (view: 'store' | 'cashier' | 'owner') => void;
+  activeView: ActiveViewType;
+  setActiveView: (view: ActiveViewType) => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -98,6 +127,8 @@ const STORAGE_KEYS = {
   SHIFTS: 'ch_shift_reports',
   USER: 'ch_user_profile',
   SHIFT_RESET_TIMESTAMP: 'ch_last_shift_reset',
+  CONTACT_MESSAGES: 'ch_contact_messages',
+  NEWSLETTER_SUBSCRIBERS: 'ch_newsletter_subscribers',
 };
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -122,11 +153,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const t = translations[language];
 
   // 2. View / Route State (support URL path or hash)
-  const [activeView, setActiveView] = useState<'store' | 'cashier' | 'owner'>(() => {
+  const [activeView, setActiveView] = useState<ActiveViewType>(() => {
     const hash = window.location.hash.toLowerCase();
     const path = window.location.pathname.toLowerCase();
     if (hash.includes('owner') || path.includes('/owner')) return 'owner';
     if (hash.includes('cashier') || path.includes('/cashier')) return 'cashier';
+    if (hash.includes('why-us') || hash.includes('why') || hash.includes('about')) return 'why-us';
+    if (hash.includes('contact')) return 'contact';
     return 'store';
   });
 
@@ -139,6 +172,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setActiveView('owner');
       } else if (hash.includes('cashier') || path.includes('/cashier')) {
         setActiveView('cashier');
+      } else if (hash.includes('why-us') || hash.includes('why') || hash.includes('about')) {
+        setActiveView('why-us');
+      } else if (hash.includes('contact')) {
+        setActiveView('contact');
       } else {
         setActiveView('store');
       }
@@ -153,16 +190,242 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // Update hash when view changes
-  const handleSetActiveView = (view: 'store' | 'cashier' | 'owner') => {
+  const handleSetActiveView = (view: ActiveViewType) => {
     setActiveView(view);
     if (view === 'store') {
       window.location.hash = '';
     } else {
       window.location.hash = view;
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 3. Products State
+  // 3. Dynamic Site Config & Content State
+  const [siteConfig] = useState<SiteConfig>(INITIAL_SITE_CONFIG);
+  const [features] = useState<FeatureItem[]>(INITIAL_FEATURES);
+  const [testimonials] = useState<Testimonial[]>(INITIAL_TESTIMONIALS);
+  const [faqs] = useState<FAQItem[]>(INITIAL_FAQS);
+  
+  // Contact Messages & Inquiries State
+  const [contactMessages, setContactMessages] = useState<ContactMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CONTACT_MESSAGES);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [
+      {
+        id: 'msg-sample-1',
+        name: 'كريم محمود',
+        phone: '01098765432',
+        email: 'karim.m@example.com',
+        subject: 'حجز مناسبة عيد ميلاد خاصة',
+        message: 'مساء الخير، هل يمكن حجز طاولة لـ 8 أشخاص مع تجهيز تورتة شوكولاتة مخصصة يوم الجمعة القادم؟',
+        status: 'new',
+        created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+      },
+      {
+        id: 'msg-sample-2',
+        name: 'سارة خالد',
+        phone: '01123456789',
+        email: 'sara.k@example.com',
+        subject: 'استفسار عن خدمة التوصيل',
+        message: 'هل يتوفر توصيل لمناطق محيطة بالحوامدية مثل طريق مصر أسيوط؟ شكراً لكم.',
+        status: 'read',
+        created_at: new Date(Date.now() - 86400000).toISOString(),
+      },
+    ];
+  });
+
+  // Newsletter Subscribers State
+  const [newsletterSubscribers, setNewsletterSubscribers] = useState<NewsletterSubscriber[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.NEWSLETTER_SUBSCRIBERS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [
+      {
+        id: 'sub-sample-1',
+        email: 'chocolate.lover@example.com',
+        is_active: true,
+        created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
+      },
+      {
+        id: 'sub-sample-2',
+        email: 'mohamed.cairo@gmail.com',
+        is_active: true,
+        created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+      },
+    ];
+  });
+
+  // Fetch initial records from Supabase if connected
+  useEffect(() => {
+    if (supabase) {
+      const fetchInitialData = async () => {
+        try {
+          // Fetch contact messages
+          const { data: messages, error: msgError } = await supabase
+            .from('contact_messages')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!msgError && messages && messages.length > 0) {
+            setContactMessages(messages);
+          }
+        } catch (err) {
+          console.warn('Error loading contact_messages from Supabase:', err);
+        }
+
+        try {
+          // Fetch newsletter subscribers
+          const { data: subs, error: subError } = await supabase
+            .from('newsletter_subscribers')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!subError && subs && subs.length > 0) {
+            setNewsletterSubscribers(subs);
+          }
+        } catch (err) {
+          console.warn('Error loading newsletter_subscribers from Supabase:', err);
+        }
+      };
+
+      fetchInitialData();
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CONTACT_MESSAGES, JSON.stringify(contactMessages));
+  }, [contactMessages]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.NEWSLETTER_SUBSCRIBERS, JSON.stringify(newsletterSubscribers));
+  }, [newsletterSubscribers]);
+
+  const submitContactMessage = async (messageData: Omit<ContactMessage, 'id' | 'created_at'>): Promise<boolean> => {
+    const newMessage: ContactMessage = {
+      ...messageData,
+      id: `msg-${Date.now()}`,
+      created_at: new Date().toISOString(),
+      status: messageData.status || 'new',
+    };
+
+    setContactMessages((prev) => [newMessage, ...prev]);
+
+    // Push to Supabase if configured
+    if (supabase) {
+      try {
+        await supabase.from('contact_messages').insert({
+          name: messageData.name,
+          phone: messageData.phone,
+          email: messageData.email || null,
+          subject: messageData.subject || null,
+          message: messageData.message,
+          status: 'new',
+        });
+      } catch (err) {
+        console.warn('Could not insert to Supabase contact_messages:', err);
+      }
+    }
+
+    showToast(
+      language === 'ar'
+        ? 'شكراً لتواصلك معنا! تم استلام رسالتك وسنقوم بالرد عليك في أقرب وقت.'
+        : 'Thank you for reaching out! Your message has been received and our team will respond shortly.',
+      'success'
+    );
+    return true;
+  };
+
+  const deleteContactMessage = async (id: string) => {
+    setContactMessages((prev) => prev.filter((m) => m.id !== id));
+    if (supabase) {
+      try {
+        await supabase.from('contact_messages').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Could not delete from Supabase contact_messages:', err);
+      }
+    }
+    showToast(language === 'ar' ? 'تم حذف الرسالة' : 'Message deleted', 'info');
+  };
+
+  const subscribeNewsletter = async (email: string): Promise<boolean> => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      showToast(language === 'ar' ? 'يرجى إدخال بريد إلكتروني صالح' : 'Please enter a valid email', 'error');
+      return false;
+    }
+
+    // Check if already subscribed
+    const existing = newsletterSubscribers.find((s) => s.email.toLowerCase() === trimmed);
+    if (existing) {
+      showToast(
+        language === 'ar'
+          ? 'هذا البريد الإلكتروني مسجل لدينا بالفعل!'
+          : 'This email is already subscribed!',
+        'info'
+      );
+      return true;
+    }
+
+    const newSubscriber: NewsletterSubscriber = {
+      id: `sub-${Date.now()}`,
+      email: trimmed,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+
+    setNewsletterSubscribers((prev) => [newSubscriber, ...prev]);
+
+    if (supabase) {
+      try {
+        await supabase.from('newsletter_subscribers').insert({
+          email: trimmed,
+          is_active: true,
+        });
+      } catch (err) {
+        console.warn('Could not insert to Supabase newsletter_subscribers:', err);
+      }
+    }
+
+    showToast(
+      language === 'ar'
+        ? 'تم اشتراكك في النشرة البريدية بنجاح! ستصلك أحدث العروض والخصومات.'
+        : 'Subscribed successfully! You will receive our latest offers and discounts.',
+      'success'
+    );
+    return true;
+  };
+
+  const deleteNewsletterSubscriber = async (id: string) => {
+    setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== id));
+    if (supabase) {
+      try {
+        await supabase.from('newsletter_subscribers').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Could not delete from Supabase newsletter_subscribers:', err);
+      }
+    }
+    showToast(language === 'ar' ? 'تم حذف المشترك' : 'Subscriber deleted', 'info');
+  };
+
+  // Backward compatibility alias for contactInquiries
+  const contactInquiries = contactMessages;
+  const submitContactInquiry = (inquiry: Omit<ContactInquiry, 'id' | 'created_at' | 'status'>): boolean => {
+    submitContactMessage({
+      name: inquiry.name,
+      phone: inquiry.phone,
+      email: inquiry.email,
+      subject: inquiry.subject,
+      message: inquiry.message,
+    });
+    return true;
+  };
+
+  // 4. Products State
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
@@ -670,6 +933,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         language,
         setLanguage,
         t,
+        siteConfig,
+        features,
+        testimonials,
+        faqs,
+        contactMessages,
+        contactInquiries,
+        submitContactInquiry,
+        submitContactMessage,
+        deleteContactMessage,
+        newsletterSubscribers,
+        subscribeNewsletter,
+        deleteNewsletterSubscriber,
         products,
         lowStockProducts,
         addProduct,

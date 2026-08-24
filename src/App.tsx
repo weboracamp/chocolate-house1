@@ -6,6 +6,8 @@
 import React from 'react';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { StoreFront } from './components/StoreFront';
+import { WhyUsPage } from './components/WhyUsPage';
+import { ContactUsPage } from './components/ContactUsPage';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { ReceiptModal } from './components/ReceiptModal';
@@ -30,6 +32,12 @@ const AppContent: React.FC = () => {
           return <AuthModal requiredRole="cashier" />;
         }
         return <CashierDashboard />;
+
+      case 'why-us':
+        return <WhyUsPage />;
+
+      case 'contact':
+        return <ContactUsPage />;
 
       case 'store':
       default:

@@ -106,6 +106,26 @@ CREATE TABLE IF NOT EXISTS public.expenses (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 8. Contact Messages / Inquiries Table
+CREATE TABLE IF NOT EXISTS public.contact_messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT,
+  subject TEXT,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 9. Newsletter Subscribers Table
+CREATE TABLE IF NOT EXISTS public.newsletter_subscribers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- ==============================================================================
 -- AUTOMATIC STOCK DECREMENT TRIGGER
 -- ==============================================================================
@@ -135,6 +155,8 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shift_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contact_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.newsletter_subscribers ENABLE ROW LEVEL SECURITY;
 
 -- Helper function to check role
 CREATE OR REPLACE FUNCTION public.current_user_role()
@@ -186,4 +208,18 @@ CREATE POLICY "Cashiers can submit shift reports" ON public.shift_reports
 
 CREATE POLICY "Staff can view shift reports" ON public.shift_reports
   FOR SELECT USING (public.current_user_role() IN ('owner', 'cashier'));
+
+-- 6. Contact Messages: Public can submit inquiries, Staff/Owner can view and delete
+CREATE POLICY "Public can submit contact messages" ON public.contact_messages
+  FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Staff can view and manage contact messages" ON public.contact_messages
+  FOR ALL USING (public.current_user_role() IN ('owner', 'cashier'));
+
+-- 7. Newsletter Subscribers: Public can subscribe, Staff/Owner can view and manage
+CREATE POLICY "Public can subscribe to newsletter" ON public.newsletter_subscribers
+  FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Staff can view and manage newsletter subscribers" ON public.newsletter_subscribers
+  FOR ALL USING (public.current_user_role() IN ('owner', 'cashier'));
 `;

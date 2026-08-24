@@ -1,3 +1,14 @@
+export type Language = 'en' | 'ar';
+
+export interface FeatureItem {
+  id: string;
+  title_en: string;
+  title_ar: string;
+  description_en: string;
+  description_ar: string;
+  icon?: string;
+}
+
 export type CategoryType =
   | 'Iced coffee'
   | 'Matcha'
@@ -113,4 +124,73 @@ export interface UserProfile {
   name: string;
 }
 
-export type Language = 'en' | 'ar';
+export type ActiveViewType = 'store' | 'why-us' | 'contact' | 'cashier' | 'owner';
+
+export interface Testimonial {
+  id: string;
+  author_en: string;
+  author_ar: string;
+  role_en: string;
+  role_ar: string;
+  comment_en: string;
+  comment_ar: string;
+  rating: number;
+  date: string;
+}
+
+export interface FAQItem {
+  id: string;
+  question_en: string;
+  question_ar: string;
+  answer_en: string;
+  answer_ar: string;
+  category?: string;
+}
+
+export interface ContactInquiry {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  subject: string;
+  message: string;
+  created_at: string;
+  status: 'new' | 'read' | 'resolved';
+}
+
+export interface ContactMessage {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  subject?: string;
+  message: string;
+  status?: 'new' | 'read' | 'resolved';
+  created_at: string;
+}
+
+export interface NewsletterSubscriber {
+  id: string;
+  email: string;
+  is_active?: boolean;
+  created_at: string;
+}
+
+export interface SiteConfig {
+  name_en: string;
+  name_ar: string;
+  slogan_en: string;
+  slogan_ar: string;
+  tagline_en: string;
+  tagline_ar: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+  address_en: string;
+  address_ar: string;
+  googleMapsUrl: string;
+  openingHours_en: string;
+  openingHours_ar: string;
+  deliveryNotice_en: string;
+  deliveryNotice_ar: string;
+}

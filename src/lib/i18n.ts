@@ -8,6 +8,21 @@ export const translations = {
     tagline: 'Artisanal Chocolates, Specialty Coffee & Desserts',
     taglineSub: 'Crafted with passion in Al Hawamdeya Giza',
     
+    // Hero & Highlights
+    heroTag: 'Handcrafted with Pure Belgian Chocolate & Specialty Beans',
+    heroTitle: 'Indulgent Chocolate, Crafted Coffee & Sweet Treats',
+    heroSubtitle: 'Discover our artisan chocolate creations, freshly prepared waffles, creamy frappes, and specialty coffee brewed to perfection.',
+    heroCta: 'Explore Full Menu',
+    
+    // Why Choose Us
+    whyChooseTitle: 'Why Choose Chocolate House',
+    whyChooseSubtitle: 'Finest ingredients, artisan Belgian chocolate recipes, and warm hospitality.',
+    
+    // Featured Products
+    featuredTitle: 'Customer Favorites & Best Sellers',
+    featuredSubtitle: 'Handcrafted signature selections loved by our guests.',
+    exploreFullMenuBtn: 'Explore Full Menu (19 Categories)',
+    
     // Navigation & Actions
     menu: 'Menu',
     cart: 'My Tray',
@@ -141,9 +156,21 @@ export const translations = {
     cashierCounted: 'Cashier Counted',
     variance: 'Discrepancy',
     viewReceipt: 'View Receipt',
-    supabaseSchemaTab: 'Supabase SQL Schema & RLS',
-    copySql: 'Copy Full PostgreSQL Script',
-    sqlCopied: 'PostgreSQL Script Copied to Clipboard!',
+    customerInquiriesTab: 'Customer Inquiries & Messages',
+    newsletterSubscribersTab: 'Newsletter Subscribers',
+    inquiriesTitle: 'Customer Inquiries (Contact Us)',
+    newsletterTitle: 'Newsletter Subscribers',
+    senderName: 'Customer Name',
+    senderPhone: 'Phone Number',
+    senderEmail: 'Email',
+    messageSubject: 'Subject',
+    messageContent: 'Message / Content',
+    inquiryDate: 'Submission Date',
+    subscriptionDate: 'Subscribed Date',
+    noInquiriesYet: 'No customer inquiries received yet.',
+    noSubscribersYet: 'No newsletter subscribers registered yet.',
+    deleteRecord: 'Delete Record',
+    copyEmail: 'Copy Email',
     
     // Order Statuses
     pending: 'Pending',
@@ -180,6 +207,21 @@ export const translations = {
     brandNameAr: 'Chocolate House',
     tagline: 'أشهى الشوكولاتة والحلويات والقهوة المختصة',
     taglineSub: 'نصنعها بكل شغف في الحوامدية - الجيزة',
+    
+    // Hero & Highlights
+    heroTag: 'مصنوعة بحب من أجود أنواع الشوكولاتة البلجيكية والبن المختص',
+    heroTitle: 'أشهى الشوكولاتة، القهوة المختصة والحلويات الفاخرة',
+    heroSubtitle: 'استمتع بإبداعات الشوكولاتة البلجيكية، كيكات المولتن الساخنة، الوافل المقرمش، والقهوة المختصة المحضرة بإتقان.',
+    heroCta: 'استكشف المنيو الكامل',
+    
+    // Why Choose Us
+    whyChooseTitle: 'لماذا تختار شوكلت هاوس؟',
+    whyChooseSubtitle: 'أجود المكونات الطبيعية، وصفات الشوكولاتة البلجيكية الأصيلة، وحسن الضيافة.',
+    
+    // Featured Products
+    featuredTitle: 'الأصناف الأكثر طلباً ومبيعاً',
+    featuredSubtitle: 'تشكيلة مختارة من أشهى إبداعاتنا المحبوبة لدى زوارنا.',
+    exploreFullMenuBtn: 'استكشف المنيو الكامل (١٩ قسماً)',
     
     // Navigation & Actions
     menu: 'قائمة الطلبات',
@@ -314,9 +356,21 @@ export const translations = {
     cashierCounted: 'المسجل من الكاشير',
     variance: 'الفارق / العجز',
     viewReceipt: 'عرض الفاتورة',
-    supabaseSchemaTab: 'مخطط Supabase وأوامر SQL و RLS',
-    copySql: 'نسخ أوامر PostgreSQL بالكامل',
-    sqlCopied: 'تم نسخ سكريبت PostgreSQL إلى الحافظة!',
+    customerInquiriesTab: 'استفسارات ورسائل العملاء',
+    newsletterSubscribersTab: 'مشتركو النشرة البريدية',
+    inquiriesTitle: 'رسائل نموذج تواصل معنا',
+    newsletterTitle: 'قائمة المشتركين في النشرة الإخبارية',
+    senderName: 'اسم العميل',
+    senderPhone: 'رقم الهاتف',
+    senderEmail: 'البريد الإلكتروني',
+    messageSubject: 'الموضوع',
+    messageContent: 'نص الرسالة',
+    inquiryDate: 'تاريخ الإرسال',
+    subscriptionDate: 'تاريخ الاشتراك',
+    noInquiriesYet: 'لا توجد رسائل أو استفسارات واردة بعد.',
+    noSubscribersYet: 'لا يوجد مشتركون في النشرة البريدية بعد.',
+    deleteRecord: 'حذف السجل',
+    copyEmail: 'نسخ البريد',
     
     // Order Statuses
     pending: 'قيد الانتظار',

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { X, Printer, CheckCircle2, QrCode } from 'lucide-react';
+import { X, Printer, CheckCircle2, MapPin } from 'lucide-react';
 
 export const ReceiptModal: React.FC = () => {
   const { language, t, activeReceiptOrder, setActiveReceiptOrder } = useStore();
@@ -9,14 +9,16 @@ export const ReceiptModal: React.FC = () => {
   if (!activeReceiptOrder) return null;
 
   const order = activeReceiptOrder;
+  const storeGoogleMapsUrl = 'https://www.google.com/maps/search/?api=1&query=Chocolate+House+Salah+Salem+ST+Al+Hawamdeya+Giza';
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=4&data=${encodeURIComponent(storeGoogleMapsUrl)}`;
 
   const handlePrint = () => {
     window.print();
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static">
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none">
         {/* Top bar (Hidden when printing) */}
         <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
@@ -28,7 +30,8 @@ export const ReceiptModal: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
-              className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A0A06] font-bold text-xs flex items-center gap-1 hover:bg-[#F7E7A9] transition-colors"
+              id="print-receipt-btn"
+              className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A0A06] font-bold text-xs flex items-center gap-1.5 hover:bg-[#F7E7A9] transition-colors shadow-xs active:scale-95"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>{t.printReceipt}</span>
@@ -42,8 +45,11 @@ export const ReceiptModal: React.FC = () => {
           </div>
         </div>
 
-        {/* PRINTABLE RECEIPT CONTENT */}
-        <div id="printable-receipt" className="p-6 text-black bg-white font-mono text-xs space-y-4">
+        {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
+        <div
+          id="thermal-receipt-content"
+          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2 print:space-y-3"
+        >
           {/* Receipt Header */}
           <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">
             <div className="flex justify-center pb-1">
@@ -184,12 +190,24 @@ export const ReceiptModal: React.FC = () => {
             )}
           </div>
 
-          {/* QR Code & Footer Thank You */}
+          {/* Functional Google Maps Location QR Code & Footer */}
           <div className="text-center pt-2 space-y-2">
-            <div className="flex justify-center opacity-80">
-              <QrCode className="w-12 h-12" />
+            <div className="flex flex-col items-center justify-center space-y-1">
+              <img
+                src={qrCodeUrl}
+                alt="Store Location QR Code - Google Maps"
+                className="w-24 h-24 sm:w-28 sm:h-28 mx-auto border border-gray-300 p-1 bg-white rounded-md"
+                referrerPolicy="no-referrer"
+              />
+              <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-gray-800 pt-1">
+                <MapPin className="w-3 h-3 text-red-600 shrink-0 print:hidden" />
+                <span>Scan for Google Maps Location</span>
+              </div>
+              <p className="text-[9px] text-gray-500" dir="rtl">
+                امسح الكود لفتح موقع الفرع في خرائط جوجل
+              </p>
             </div>
-            <p className="text-[11px] font-bold">
+            <p className="text-[11px] font-bold pt-1">
               Thank you for visiting Chocolate House!
             </p>
             <p className="text-[10px] text-gray-500" dir="rtl">

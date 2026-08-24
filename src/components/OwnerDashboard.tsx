@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
 import { Product, CategoryType, OrderStatus } from '../types';
-import { SUPABASE_SQL_SCHEMA } from '../lib/supabaseSchema';
 import { EXACT_CATEGORIES } from './CategoryFilter';
 import {
   TrendingUp,
@@ -18,7 +17,6 @@ import {
   LogOut,
   Sparkles,
   Award,
-  Database,
   Copy,
   Check,
   Printer,
@@ -26,6 +24,11 @@ import {
   ExternalLink,
   Package,
   Layers,
+  Mail,
+  Users,
+  MessageSquare,
+  PhoneCall,
+  Phone,
 } from 'lucide-react';
 
 export const OwnerDashboard: React.FC = () => {
@@ -47,16 +50,22 @@ export const OwnerDashboard: React.FC = () => {
     logout,
     setActiveView,
     showToast,
+    contactMessages,
+    deleteContactMessage,
+    newsletterSubscribers,
+    deleteNewsletterSubscriber,
   } = useStore();
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'inventory' | 'financials' | 'shifts' | 'schema'
+    'orders' | 'inventory' | 'financials' | 'shifts' | 'inquiries' | 'subscribers'
   >('orders');
 
   // Period filtering for orders ('daily' | 'monthly' | 'yearly')
   const [periodFilter, setPeriodFilter] = useState<'daily' | 'monthly' | 'yearly'>('monthly');
   const [searchQuery, setSearchQuery] = useState('');
+  const [inquirySearch, setInquirySearch] = useState('');
+  const [subscriberSearch, setSubscriberSearch] = useState('');
 
   // Product Modal State (Add / Edit)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -76,7 +85,10 @@ export const OwnerDashboard: React.FC = () => {
   // Export Modal Confirmation
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportedSummary, setExportedSummary] = useState<any>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedEmails, setCopiedEmails] = useState(false);
+
+  // Selected message for detail view
+  const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
 
   // Filter orders by period
   const now = new Date();
@@ -210,13 +222,6 @@ export const OwnerDashboard: React.FC = () => {
   const handleExecuteExportAndReset = () => {
     const result = exportAndResetMonthlyData();
     setExportedSummary(result);
-  };
-
-  const copySqlSchema = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-    setCopiedSql(true);
-    showToast(t.sqlCopied, 'success');
-    setTimeout(() => setCopiedSql(false), 2000);
   };
 
   return (
@@ -451,14 +456,29 @@ export const OwnerDashboard: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('schema')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'schema'
+            id="owner-inquiries-tab"
+            onClick={() => setActiveTab('inquiries')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeTab === 'inquiries'
                 ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md'
                 : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
             }`}
           >
-            <span>{t.supabaseSchemaTab}</span>
+            <Mail className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <span>{t.customerInquiriesTab} ({contactMessages.length})</span>
+          </button>
+
+          <button
+            id="owner-subscribers-tab"
+            onClick={() => setActiveTab('subscribers')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeTab === 'subscribers'
+                ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md'
+                : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <span>{t.newsletterSubscribersTab} ({newsletterSubscribers.length})</span>
           </button>
         </div>
 
@@ -797,37 +817,347 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* 7. TAB 4: SUPABASE SQL SCHEMA & RLS */}
-        {activeTab === 'schema' && (
-          <div className="bg-white rounded-2xl border border-[#D4AF37]/30 p-5 space-y-4 shadow-xs">
-            <div className="flex items-center justify-between">
+        {/* 5. TAB: CUSTOMER INQUIRIES & MESSAGES */}
+        {activeTab === 'inquiries' && (
+          <div className="space-y-4">
+            {/* Header & Search */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-[#D4AF37]/25 shadow-xs">
               <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-[#D4AF37]" />
+                <div className="p-2 rounded-xl bg-[#2B140E] text-[#D4AF37]">
+                  <Mail className="w-5 h-5" />
+                </div>
                 <div>
-                  <h3 className="text-sm font-bold text-[#2B140E]">
-                    Supabase PostgreSQL Production Schema & RLS Policies
-                  </h3>
+                  <h2 className="text-sm sm:text-base font-bold text-[#2B140E]">
+                    {t.inquiriesTitle}
+                  </h2>
                   <p className="text-xs text-gray-500">
-                    Includes tables for Products, Orders, Profiles (RBAC), Expenses, Shift Reports, and Triggers
+                    {contactMessages.length} {language === 'ar' ? 'رسالة واستفسار مسجل' : 'inquiries received from Contact Us page'}
                   </p>
                 </div>
               </div>
 
-              <button
-                onClick={copySqlSchema}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors"
-              >
-                {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />}
-                <span>{copiedSql ? 'Copied!' : t.copySql}</span>
-              </button>
+              {/* Search */}
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5 rtl:left-auto rtl:right-3" />
+                <input
+                  type="text"
+                  value={inquirySearch}
+                  onChange={(e) => setInquirySearch(e.target.value)}
+                  placeholder={language === 'ar' ? 'بحث بالاسم، الهاتف، الرسالة...' : 'Search inquiries by name, phone...'}
+                  className="w-full pl-9 pr-3 rtl:pl-3 rtl:pr-9 py-2 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden bg-[#FFFBF5]"
+                />
+              </div>
             </div>
 
-            <pre className="p-4 rounded-xl bg-[#1A0A06] text-[#F7E7A9] font-mono text-xs overflow-x-auto max-h-96 border border-[#D4AF37]/30 leading-relaxed">
-              <code>{SUPABASE_SQL_SCHEMA}</code>
-            </pre>
+            {/* Inquiries Table */}
+            <div className="bg-white rounded-2xl border border-[#D4AF37]/30 overflow-hidden shadow-xs">
+              {contactMessages.length === 0 ? (
+                <div className="p-12 text-center text-gray-500 space-y-2">
+                  <Mail className="w-10 h-10 text-[#D4AF37]/40 mx-auto" />
+                  <p className="text-xs font-semibold">{t.noInquiriesYet}</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#FFFBF5] text-[#2B140E] border-b border-[#D4AF37]/20 font-bold uppercase text-[10px]">
+                      <tr>
+                        <th className="p-3.5">{t.senderName}</th>
+                        <th className="p-3.5">{t.senderPhone}</th>
+                        <th className="p-3.5">{t.senderEmail}</th>
+                        <th className="p-3.5">{t.messageSubject}</th>
+                        <th className="p-3.5">{t.inquiryDate}</th>
+                        <th className="p-3.5 text-right rtl:text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {contactMessages
+                        .filter((m) => {
+                          if (!inquirySearch.trim()) return true;
+                          const q = inquirySearch.toLowerCase();
+                          return (
+                            m.name.toLowerCase().includes(q) ||
+                            m.phone.toLowerCase().includes(q) ||
+                            (m.email && m.email.toLowerCase().includes(q)) ||
+                            (m.subject && m.subject.toLowerCase().includes(q)) ||
+                            m.message.toLowerCase().includes(q)
+                          );
+                        })
+                        .map((msg) => (
+                          <tr key={msg.id} className="hover:bg-amber-50/40 transition-colors">
+                            <td className="p-3.5 font-bold text-[#2B140E] whitespace-nowrap">
+                              {msg.name}
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 font-mono">
+                                <span>{msg.phone}</span>
+                                <a
+                                  href={`tel:${msg.phone}`}
+                                  className="p-1 rounded-md text-gray-500 hover:text-green-700 hover:bg-green-50"
+                                  title="Call"
+                                >
+                                  <Phone className="w-3 h-3" />
+                                </a>
+                                <a
+                                  href={`https://wa.me/${msg.phone.replace(/[^0-9]/g, '')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 rounded-md text-emerald-600 hover:bg-emerald-50 font-bold text-[10px]"
+                                  title="WhatsApp"
+                                >
+                                  WA
+                                </a>
+                              </div>
+                            </td>
+                            <td className="p-3.5 text-gray-600 whitespace-nowrap">
+                              {msg.email ? (
+                                <a
+                                  href={`mailto:${msg.email}`}
+                                  className="hover:underline text-blue-700 font-mono"
+                                >
+                                  {msg.email}
+                                </a>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="p-3.5 max-w-xs truncate">
+                              <div className="font-semibold text-[#2B140E] truncate">
+                                {msg.subject || (language === 'ar' ? 'استفسار عام' : 'General Inquiry')}
+                              </div>
+                              <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                                {msg.message}
+                              </p>
+                            </td>
+                            <td className="p-3.5 text-[10px] text-gray-500 whitespace-nowrap">
+                              {new Date(msg.created_at).toLocaleString()}
+                            </td>
+                            <td className="p-3.5 text-right rtl:text-left whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => setSelectedMessage(msg)}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
+                                >
+                                  {language === 'ar' ? 'عرض' : 'View'}
+                                </button>
+                                <button
+                                  onClick={() => deleteContactMessage(msg.id)}
+                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50"
+                                  title={t.deleteRecord}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 6. TAB: NEWSLETTER SUBSCRIBERS */}
+        {activeTab === 'subscribers' && (
+          <div className="space-y-4">
+            {/* Header & Controls */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-[#D4AF37]/25 shadow-xs">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-[#2B140E] text-[#D4AF37]">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-[#2B140E]">
+                    {t.newsletterTitle}
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {newsletterSubscribers.length} {language === 'ar' ? 'مشترك في القائمة البريدية' : 'registered subscribers'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Search */}
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5 rtl:left-auto rtl:right-3" />
+                  <input
+                    type="text"
+                    value={subscriberSearch}
+                    onChange={(e) => setSubscriberSearch(e.target.value)}
+                    placeholder={language === 'ar' ? 'بحث بالبريد...' : 'Search email...'}
+                    className="w-full pl-9 pr-3 rtl:pl-3 rtl:pr-9 py-2 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden bg-[#FFFBF5]"
+                  />
+                </div>
+
+                {/* Copy all emails button */}
+                <button
+                  onClick={() => {
+                    const emails = newsletterSubscribers.map((s) => s.email).join(', ');
+                    navigator.clipboard.writeText(emails);
+                    setCopiedEmails(true);
+                    showToast(language === 'ar' ? 'تم نسخ جميع الإيميلات إلى الحافظة' : 'Copied all emails to clipboard', 'success');
+                    setTimeout(() => setCopiedEmails(false), 2000);
+                  }}
+                  disabled={newsletterSubscribers.length === 0}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {copiedEmails ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />}
+                  <span>{copiedEmails ? 'Copied!' : language === 'ar' ? 'نسخ الكل' : 'Copy All'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Subscribers Table */}
+            <div className="bg-white rounded-2xl border border-[#D4AF37]/30 overflow-hidden shadow-xs">
+              {newsletterSubscribers.length === 0 ? (
+                <div className="p-12 text-center text-gray-500 space-y-2">
+                  <Users className="w-10 h-10 text-[#D4AF37]/40 mx-auto" />
+                  <p className="text-xs font-semibold">{t.noSubscribersYet}</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#FFFBF5] text-[#2B140E] border-b border-[#D4AF37]/20 font-bold uppercase text-[10px]">
+                      <tr>
+                        <th className="p-3.5 w-12">#</th>
+                        <th className="p-3.5">{t.senderEmail}</th>
+                        <th className="p-3.5">{t.subscriptionDate}</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5 text-right rtl:text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {newsletterSubscribers
+                        .filter((s) => {
+                          if (!subscriberSearch.trim()) return true;
+                          return s.email.toLowerCase().includes(subscriberSearch.toLowerCase());
+                        })
+                        .map((sub, idx) => (
+                          <tr key={sub.id} className="hover:bg-amber-50/40 transition-colors">
+                            <td className="p-3.5 font-mono text-gray-400">{idx + 1}</td>
+                            <td className="p-3.5 font-bold font-mono text-[#2B140E]">
+                              {sub.email}
+                            </td>
+                            <td className="p-3.5 text-[10px] text-gray-500">
+                              {new Date(sub.created_at).toLocaleString()}
+                            </td>
+                            <td className="p-3.5">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-800">
+                                {language === 'ar' ? 'نشط' : 'Active'}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right rtl:text-left whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(sub.email);
+                                    showToast(language === 'ar' ? 'تم نسخ البريد الإلكتروني' : 'Email copied', 'info');
+                                  }}
+                                  className="px-2 py-1 rounded-md text-xs font-semibold text-gray-600 hover:bg-gray-100"
+                                  title={t.copyEmail}
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => deleteNewsletterSubscriber(sub.id)}
+                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50"
+                                  title={t.deleteRecord}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>
+
+      {/* MODAL: VIEW INQUIRY DETAILS */}
+      {selectedMessage && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Mail className="w-5 h-5 text-[#D4AF37]" />
+                <h3 className="text-base font-bold text-[#2B140E]">
+                  {language === 'ar' ? 'تفاصيل رسالة العميل' : 'Customer Inquiry Details'}
+                </h3>
+              </div>
+              <span className="text-[10px] text-gray-500 font-mono">
+                {new Date(selectedMessage.created_at).toLocaleString()}
+              </span>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2 bg-[#FFFBF5] p-3 rounded-xl border border-[#D4AF37]/20">
+                <div>
+                  <span className="text-gray-500 block text-[10px] uppercase font-bold">{t.senderName}:</span>
+                  <span className="font-bold text-[#2B140E]">{selectedMessage.name}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block text-[10px] uppercase font-bold">{t.senderPhone}:</span>
+                  <span className="font-mono font-bold text-[#2B140E]">{selectedMessage.phone}</span>
+                </div>
+                {selectedMessage.email && (
+                  <div className="col-span-2 pt-1 border-t border-gray-200">
+                    <span className="text-gray-500 block text-[10px] uppercase font-bold">{t.senderEmail}:</span>
+                    <span className="font-mono text-blue-700">{selectedMessage.email}</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <span className="text-gray-500 block text-[10px] uppercase font-bold mb-0.5">{t.messageSubject}:</span>
+                <p className="font-bold text-sm text-[#2B140E]">
+                  {selectedMessage.subject || (language === 'ar' ? 'استفسار عام' : 'General Inquiry')}
+                </p>
+              </div>
+
+              <div>
+                <span className="text-gray-500 block text-[10px] uppercase font-bold mb-1">{t.messageContent}:</span>
+                <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-gray-800 leading-relaxed whitespace-pre-wrap">
+                  {selectedMessage.message}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <a
+                  href={`tel:${selectedMessage.phone}`}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700"
+                >
+                  <PhoneCall className="w-3 h-3" />
+                  <span>Call</span>
+                </a>
+                <a
+                  href={`https://wa.me/${selectedMessage.phone.replace(/[^0-9]/g, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#25D366] text-white hover:bg-[#20b858]"
+                >
+                  <MessageSquare className="w-3 h-3" />
+                  <span>WhatsApp</span>
+                </a>
+              </div>
+
+              <button
+                onClick={() => setSelectedMessage(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
+              >
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: ADD / EDIT PRODUCT */}
       {isProductModalOpen && (
