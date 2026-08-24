@@ -1,7 +1,6 @@
-export const SUPABASE_SQL_SCHEMA = `-- ==============================================================================
+-- ==============================================================================
 -- CHOCOLATE HOUSE - شوكلت هاوس
 -- Supabase PostgreSQL Database Schema & Row Level Security (RLS)
--- Copy and paste this directly into your Supabase SQL Editor and click "Run"
 -- ==============================================================================
 
 -- 1. Create Enums safely
@@ -257,4 +256,3 @@ CREATE POLICY "Public can subscribe to newsletter" ON public.newsletter_subscrib
 DROP POLICY IF EXISTS "Staff can manage newsletter subscribers" ON public.newsletter_subscribers;
 CREATE POLICY "Staff can manage newsletter subscribers" ON public.newsletter_subscribers
   FOR ALL USING (true);
-`;

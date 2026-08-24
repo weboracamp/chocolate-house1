@@ -320,6 +320,81 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } catch (err) {
           console.warn('Error loading newsletter_subscribers via cache:', err);
         }
+
+        try {
+          // 3. Fetch orders and order_items through caching layer (TTL: 2 mins)
+          const { data: remoteOrders, fromCache: ordersFromCache, error: ordError } = await cachedSupabaseQuery<Order[]>(
+            'orders',
+            async () => {
+              const { data: ordersData, error: ordersErr } = await supabase!
+                .from('orders')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+              if (ordersErr || !ordersData) return { data: null, error: ordersErr };
+
+              // Fetch order items for these orders
+              const { data: itemsData } = await supabase!
+                .from('order_items')
+                .select('*');
+
+              const mappedOrders: Order[] = ordersData.map((ord: any) => {
+                const items = (itemsData || [])
+                  .filter((item: any) => item.order_id === ord.id)
+                  .map((item: any) => ({
+                    product_id: item.product_id || '',
+                    product_name_en: item.product_name_en,
+                    product_name_ar: item.product_name_ar,
+                    quantity: item.quantity,
+                    unit_price: Number(item.unit_price),
+                    total_price: Number(item.total_price),
+                    image: item.image,
+                  }));
+
+                return {
+                  id: ord.id,
+                  order_number: ord.order_number,
+                  order_type: ord.order_type,
+                  customer_name: ord.customer_name,
+                  customer_phone: ord.customer_phone,
+                  table_number: ord.table_number || undefined,
+                  delivery_address: ord.delivery_address || undefined,
+                  pickup_time: ord.pickup_time || undefined,
+                  notes: ord.notes || undefined,
+                  payment_method: ord.payment_method,
+                  transfer_from_phone: ord.transfer_from_phone || undefined,
+                  amount_transferred: ord.amount_transferred ? Number(ord.amount_transferred) : undefined,
+                  items,
+                  subtotal: Number(ord.subtotal),
+                  delivery_fee: Number(ord.delivery_fee || 0),
+                  discount_total: Number(ord.discount_total || 0),
+                  total: Number(ord.total),
+                  status: ord.status,
+                  created_at: ord.created_at,
+                  shift_id: ord.shift_id || undefined,
+                  is_archived: Boolean(ord.is_archived),
+                };
+              });
+
+              return { data: mappedOrders, error: null };
+            },
+            { table: 'orders' }
+          );
+
+          if (!ordError && remoteOrders && remoteOrders.length > 0) {
+            setOrders((prevLocal) => {
+              // Merge remote and local orders gracefully without duplicating
+              const existingIds = new Set(prevLocal.map((o) => o.id));
+              const newFromRemote = remoteOrders.filter((ro) => !existingIds.has(ro.id));
+              return [...prevLocal, ...newFromRemote];
+            });
+            if (ordersFromCache) {
+              console.info('[StoreContext] ⚡ Loaded orders from client-side cache');
+            }
+          }
+        } catch (err) {
+          console.warn('Error loading orders from Supabase via cache:', err);
+        }
       };
 
       fetchInitialData();
@@ -700,6 +775,55 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     invalidateCache('orders');
     invalidateCache('products');
 
+    // Async push to Supabase if connected
+    if (supabase) {
+      (async () => {
+        try {
+          // 1. Insert order record
+          await supabase.from('orders').insert({
+            id: newOrder.id,
+            order_number: newOrder.order_number,
+            order_type: newOrder.order_type,
+            customer_name: newOrder.customer_name,
+            customer_phone: newOrder.customer_phone,
+            table_number: newOrder.table_number || null,
+            delivery_address: newOrder.delivery_address || null,
+            pickup_time: newOrder.pickup_time || null,
+            notes: newOrder.notes || null,
+            payment_method: newOrder.payment_method,
+            transfer_from_phone: newOrder.transfer_from_phone || null,
+            amount_transferred: newOrder.amount_transferred || null,
+            subtotal: newOrder.subtotal,
+            delivery_fee: newOrder.delivery_fee,
+            discount_total: newOrder.discount_total,
+            total: newOrder.total,
+            status: newOrder.status,
+            is_archived: false,
+            created_at: newOrder.created_at,
+          });
+
+          // 2. Insert order items
+          const itemsPayload = newOrder.items.map((item, idx) => ({
+            id: `item-${Date.now()}-${idx}`,
+            order_id: newOrder.id,
+            product_id: item.product_id || null,
+            product_name_en: item.product_name_en,
+            product_name_ar: item.product_name_ar,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: item.total_price,
+            image: item.image || null,
+          }));
+
+          if (itemsPayload.length > 0) {
+            await supabase.from('order_items').insert(itemsPayload);
+          }
+        } catch (err) {
+          console.warn('Failed to insert order to Supabase:', err);
+        }
+      })();
+    }
+
     // Fire celebratory confetti!
     try {
       confetti({
@@ -727,6 +851,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((o) => (o.id === orderId ? { ...o, status } : o))
     );
     invalidateCache('orders');
+    if (supabase) {
+      supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', orderId)
+        .then(({ error }) => {
+          if (error) console.warn('Failed to update order status in Supabase:', error);
+        });
+    }
     showToast(
       language === 'ar'
         ? `تم تحديث حالة الطلب إلى "${translations.ar[status]}"`

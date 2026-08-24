@@ -3,6 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
 import { Product, CategoryType, OrderStatus } from '../types';
 import { EXACT_CATEGORIES } from './CategoryFilter';
+import { SUPABASE_SQL_SCHEMA } from '../lib/supabaseSchema';
 import {
   TrendingUp,
   CreditCard,
@@ -29,6 +30,7 @@ import {
   MessageSquare,
   PhoneCall,
   Phone,
+  Database,
 } from 'lucide-react';
 
 export const OwnerDashboard: React.FC = () => {
@@ -89,6 +91,10 @@ export const OwnerDashboard: React.FC = () => {
 
   // Selected message for detail view
   const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
+
+  // Supabase SQL Modal State
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // Filter orders by period
   const now = new Date();
