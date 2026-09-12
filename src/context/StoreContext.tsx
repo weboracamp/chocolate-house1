@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   Product,
   Order,
@@ -158,6 +158,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = language;
+  }, [language]);
+
+  const languageRef = useRef(language);
+  useEffect(() => {
+    languageRef.current = language;
   }, [language]);
 
   const t = translations[language];
@@ -1015,6 +1020,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
   }, [orders]);
 
+  const ordersRef = useRef(orders);
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
   // Last shift reset timestamp (to filter Cashier daily view)
   const [lastShiftReset, setLastShiftReset] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP) || new Date(0).toISOString();
@@ -1691,6 +1701,223 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // Realtime subscriptions for live updates (orders, order_items, contact_messages, newsletter_subscribers)
+  useEffect(() => {
+    if (!supabase) return;
+
+    const lang = () => languageRef.current;
+
+    const playNotificationSound = () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+        osc.onended = () => ctx.close();
+      } catch {
+        // ignore
+      }
+    };
+
+    const mapOrderWithItems = async (ord: any): Promise<Order> => {
+      const { data: itemsData } = await supabase!
+        .from('order_items')
+        .select('*')
+        .eq('order_id', ord.id);
+
+      const items: OrderItem[] = (itemsData || []).map((item: any) => ({
+        product_id: item.product_id || '',
+        product_name_en: item.product_name_en,
+        product_name_ar: item.product_name_ar,
+        quantity: item.quantity,
+        unit_price: Number(item.unit_price),
+        total_price: Number(item.total_price),
+        image: item.image,
+      }));
+
+      return {
+        id: ord.id,
+        order_number: ord.order_number,
+        order_type: ord.order_type,
+        customer_name: ord.customer_name,
+        customer_phone: ord.customer_phone,
+        table_number: ord.table_number || undefined,
+        delivery_address: ord.delivery_address || undefined,
+        pickup_time: ord.pickup_time || undefined,
+        notes: ord.notes || undefined,
+        payment_method: ord.payment_method,
+        transfer_from_phone: ord.transfer_from_phone || undefined,
+        amount_transferred: ord.amount_transferred ? Number(ord.amount_transferred) : undefined,
+        items,
+        subtotal: Number(ord.subtotal),
+        delivery_fee: Number(ord.delivery_fee || 0),
+        discount_total: Number(ord.discount_total || 0),
+        total: Number(ord.total),
+        status: ord.status,
+        created_at: ord.created_at,
+        shift_id: ord.shift_id || undefined,
+        is_archived: Boolean(ord.is_archived),
+      };
+    };
+
+    // 1. Orders: INSERT, UPDATE, DELETE
+    const ordersChannel = supabase
+      .channel('realtime-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, async (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+
+        if (eventType === 'INSERT') {
+          if (ordersRef.current.some((o) => o.id === newRecord.id)) return;
+
+          try {
+            const mappedOrder = await mapOrderWithItems(newRecord);
+            let wasAdded = false;
+            setOrders((prev) => {
+              if (prev.some((o) => o.id === mappedOrder.id)) return prev;
+              wasAdded = true;
+              return [mappedOrder, ...prev];
+            });
+            if (!wasAdded) return;
+            invalidateCache('orders');
+
+            playNotificationSound();
+            showToast(
+              lang() === 'ar'
+                ? `طلب جديد! ${mappedOrder.order_number} - ${mappedOrder.customer_name}`
+                : `New order! ${mappedOrder.order_number} - ${mappedOrder.customer_name}`,
+              'success'
+            );
+          } catch (err) {
+            console.warn('[Realtime] Failed to fetch items for new order:', err);
+          }
+        } else if (eventType === 'UPDATE') {
+          setOrders((prev) =>
+            prev.map((o) =>
+              o.id === newRecord.id
+                ? {
+                    ...o,
+                    order_number: newRecord.order_number,
+                    order_type: newRecord.order_type,
+                    customer_name: newRecord.customer_name,
+                    customer_phone: newRecord.customer_phone,
+                    table_number: newRecord.table_number || undefined,
+                    delivery_address: newRecord.delivery_address || undefined,
+                    pickup_time: newRecord.pickup_time || undefined,
+                    notes: newRecord.notes || undefined,
+                    payment_method: newRecord.payment_method,
+                    transfer_from_phone: newRecord.transfer_from_phone || undefined,
+                    amount_transferred: newRecord.amount_transferred ? Number(newRecord.amount_transferred) : undefined,
+                    subtotal: Number(newRecord.subtotal),
+                    delivery_fee: Number(newRecord.delivery_fee || 0),
+                    discount_total: Number(newRecord.discount_total || 0),
+                    total: Number(newRecord.total),
+                    status: newRecord.status,
+                    is_archived: Boolean(newRecord.is_archived),
+                  }
+                : o
+            )
+          );
+          invalidateCache('orders');
+        } else if (eventType === 'DELETE') {
+          setOrders((prev) => prev.filter((o) => o.id !== oldRecord.id));
+          invalidateCache('orders');
+        }
+      })
+      .subscribe();
+
+    // 2. Order items: INSERT (so new items appear immediately on existing orders)
+    const orderItemsChannel = supabase
+      .channel('realtime-order-items')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_items' }, (payload) => {
+        const newItem = payload.new as any;
+        setOrders((prev) =>
+          prev.map((o) => {
+            if (o.id !== newItem.order_id) return o;
+            const mappedItem: OrderItem = {
+              product_id: newItem.product_id || '',
+              product_name_en: newItem.product_name_en,
+              product_name_ar: newItem.product_name_ar,
+              quantity: newItem.quantity,
+              unit_price: Number(newItem.unit_price),
+              total_price: Number(newItem.total_price),
+              image: newItem.image,
+            };
+            if (
+              o.items.some(
+                (i) =>
+                  i.product_id === mappedItem.product_id &&
+                  i.quantity === mappedItem.quantity &&
+                  i.unit_price === mappedItem.unit_price
+              )
+            ) {
+              return o;
+            }
+            return { ...o, items: [...o.items, mappedItem] };
+          })
+        );
+      })
+      .subscribe();
+
+    // 3. Contact messages: INSERT, UPDATE, DELETE
+    const contactMessagesChannel = supabase
+      .channel('realtime-contact-messages')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_messages' }, (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+
+        if (eventType === 'INSERT') {
+          setContactMessages((prev) => {
+            if (prev.some((m) => m.id === newRecord.id)) return prev;
+            return [newRecord as ContactMessage, ...prev];
+          });
+          invalidateCache('contact_messages');
+        } else if (eventType === 'UPDATE') {
+          setContactMessages((prev) =>
+          prev.map((m) => (m.id === newRecord.id ? { ...m, ...newRecord } as ContactMessage : m))
+          );
+          invalidateCache('contact_messages');
+        } else if (eventType === 'DELETE') {
+          setContactMessages((prev) => prev.filter((m) => m.id !== oldRecord.id));
+          invalidateCache('contact_messages');
+        }
+      })
+      .subscribe();
+
+    // 4. Newsletter subscribers: INSERT, DELETE
+    const newsletterChannel = supabase
+      .channel('realtime-newsletter-subscribers')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'newsletter_subscribers' }, (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+
+        if (eventType === 'INSERT') {
+          setNewsletterSubscribers((prev) => {
+            if (prev.some((s) => s.id === newRecord.id)) return prev;
+            return [newRecord as NewsletterSubscriber, ...prev];
+          });
+          invalidateCache('newsletter_subscribers');
+        } else if (eventType === 'DELETE') {
+          setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== oldRecord.id));
+          invalidateCache('newsletter_subscribers');
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(orderItemsChannel);
+      supabase.removeChannel(contactMessagesChannel);
+      supabase.removeChannel(newsletterChannel);
+    };
+  }, []);
 
   return (
     <StoreContext.Provider
