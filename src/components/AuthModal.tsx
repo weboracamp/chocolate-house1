@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { Lock, Mail, Key, ShieldCheck, UserCheck, ArrowLeft } from 'lucide-react';
+import { Lock, Mail, Key, ShieldCheck, UserCheck, ArrowLeft, Loader2 } from 'lucide-react';
 
 interface AuthModalProps {
   requiredRole: 'owner' | 'cashier';
@@ -9,41 +9,40 @@ interface AuthModalProps {
 
 export const AuthModal: React.FC<AuthModalProps> = ({ requiredRole }) => {
   const { language, t, login, setActiveView } = useStore();
-  const [email, setEmail] = useState(
-    requiredRole === 'owner' ? 'owner@chocolatehouse.com' : 'cashier@chocolatehouse.com'
-  );
-  const [password, setPassword] = useState(
-    requiredRole === 'owner' ? 'owner123' : 'cashier123'
-  );
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError(language === 'ar' ? 'يرجى إدخال البريد وكلمة المرور' : 'Please fill all fields');
+    setError('');
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError(
+        language === 'ar'
+          ? 'يرجى إدخال البريد الإلكتروني وكلمة المرور'
+          : 'Please enter your email and password'
+      );
       return;
     }
 
-    if (requiredRole === 'owner') {
-      if (password.length < 4) {
-        setError(language === 'ar' ? 'كلمة المرور غير صحيحة' : 'Invalid credentials');
-        return;
+    setLoading(true);
+    try {
+      const res = await login(trimmedEmail, password, requiredRole);
+      if (!res.success) {
+        setError(
+          res.error ||
+            (language === 'ar'
+              ? 'بيانات تسجيل الدخول غير صحيحة، يرجى المحاولة مرة أخرى'
+              : 'Invalid credentials. Please verify your email and password.')
+        );
       }
-      login(email, 'owner', 'Ahmed Al-Sayed (Owner)');
-    } else {
-      if (password.length < 4) {
-        setError(language === 'ar' ? 'كلمة المرور غير صحيحة' : 'Invalid credentials');
-        return;
-      }
-      login(email, 'cashier', 'Mahmoud Barista (Shift #1)');
-    }
-  };
-
-  const handleQuickLogin = (role: 'owner' | 'cashier') => {
-    if (role === 'owner') {
-      login('owner@chocolatehouse.com', 'owner', 'Ahmed Al-Sayed (Owner)');
-    } else {
-      login('cashier@chocolatehouse.com', 'cashier', 'Mahmoud Barista (Shift #1)');
+    } catch (err: any) {
+      setError(err?.message || 'Login failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -98,8 +97,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ requiredRole }) => {
               <span>{t.emailOrUsername}</span>
             </label>
             <input
-              type="text"
+              type="email"
               required
+              autoComplete="email"
+              placeholder={requiredRole === 'owner' ? 'owner@example.com' : 'cashier@example.com'}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[#1A0A06] border border-[#D4AF37]/30 text-sm text-white placeholder-gray-500 focus:outline-hidden focus:border-[#D4AF37]"
@@ -114,58 +115,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({ requiredRole }) => {
             <input
               type="password"
               required
+              autoComplete="current-password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[#1A0A06] border border-[#D4AF37]/30 text-sm text-white placeholder-gray-500 focus:outline-hidden focus:border-[#D4AF37]"
             />
           </div>
 
-          {error && <p className="text-xs text-red-400 font-medium">{error}</p>}
+          {error && (
+            <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-xs text-red-300 font-medium">
+              {error}
+            </div>
+          )}
 
           <button
             type="submit"
             id="portal-login-submit-btn"
-            className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all duration-200 active:scale-98"
+            disabled={loading}
+            className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all duration-200 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
               color: '#1A0A06',
               boxShadow: '0 4px 15px rgba(212, 175, 55, 0.4)',
             }}
           >
-            <Lock className="w-4 h-4 text-[#1A0A06]" />
-            <span>{t.loginButton}</span>
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-[#1A0A06]" />
+                <span>{language === 'ar' ? 'جارٍ التحقق...' : 'Signing in...'}</span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-4 h-4 text-[#1A0A06]" />
+                <span>{t.loginButton}</span>
+              </>
+            )}
           </button>
         </form>
 
-        {/* Quick Demo Fill Buttons */}
-        <div className="pt-4 border-t border-[#D4AF37]/20 space-y-2">
-          <p className="text-[11px] text-[#D4AF37] font-semibold uppercase tracking-wider text-center">
-            {language === 'ar' ? 'تسجيل دخول سريع للتجربة' : 'Quick Demo Access'}
+        {/* Security Notice */}
+        <div className="pt-4 border-t border-[#D4AF37]/20 text-center">
+          <p className="text-[11px] text-[#F7E7A9]/60">
+            {language === 'ar'
+              ? '🔒 محمي بواسطة مصادقة Supabase المشفرة'
+              : '🔒 Protected by Supabase Encrypted Authentication'}
           </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('owner')}
-              className={`p-2 rounded-xl text-xs font-bold border transition-colors ${
-                requiredRole === 'owner'
-                  ? 'bg-[#D4AF37]/20 border-[#D4AF37] text-[#F7E7A9]'
-                  : 'bg-black/30 border-white/10 text-white/70 hover:text-white'
-              }`}
-            >
-              👑 Owner Demo
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('cashier')}
-              className={`p-2 rounded-xl text-xs font-bold border transition-colors ${
-                requiredRole === 'cashier'
-                  ? 'bg-[#D4AF37]/20 border-[#D4AF37] text-[#F7E7A9]'
-                  : 'bg-black/30 border-white/10 text-white/70 hover:text-white'
-              }`}
-            >
-              ☕ Cashier Demo
-            </button>
-          </div>
         </div>
       </div>
     </div>

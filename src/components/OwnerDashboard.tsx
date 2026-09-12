@@ -31,6 +31,7 @@ import {
   PhoneCall,
   Phone,
   Database,
+  Loader2,
 } from 'lucide-react';
 
 export const OwnerDashboard: React.FC = () => {
@@ -186,7 +187,9 @@ export const OwnerDashboard: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     const price = parseFloat(formPrice);
     const stock = parseInt(formStock, 10);
@@ -194,35 +197,45 @@ export const OwnerDashboard: React.FC = () => {
 
     if (!formNameEn.trim() || !formNameAr.trim() || isNaN(price) || isNaN(stock)) return;
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        name_en: formNameEn.trim(),
-        name_ar: formNameAr.trim(),
-        description_en: formDescEn.trim(),
-        description_ar: formDescAr.trim(),
-        price,
-        discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
-        category: formCategory,
-        stock,
-        image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
-        is_best_seller: formIsBestSeller,
-      });
-    } else {
-      addProduct({
-        name_en: formNameEn.trim(),
-        name_ar: formNameAr.trim(),
-        description_en: formDescEn.trim(),
-        description_ar: formDescAr.trim(),
-        price,
-        discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
-        category: formCategory,
-        stock,
-        image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
-        is_best_seller: formIsBestSeller,
-      });
+    setIsSavingProduct(true);
+    let success = false;
+    try {
+      if (editingProduct) {
+        success = await updateProduct(editingProduct.id, {
+          name_en: formNameEn.trim(),
+          name_ar: formNameAr.trim(),
+          description_en: formDescEn.trim(),
+          description_ar: formDescAr.trim(),
+          price,
+          discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
+          category: formCategory,
+          stock,
+          image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
+          is_best_seller: formIsBestSeller,
+        });
+      } else {
+        success = await addProduct({
+          name_en: formNameEn.trim(),
+          name_ar: formNameAr.trim(),
+          description_en: formDescEn.trim(),
+          description_ar: formDescAr.trim(),
+          price,
+          discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
+          category: formCategory,
+          stock,
+          image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
+          is_best_seller: formIsBestSeller,
+        });
+      }
+    } catch (err) {
+      console.error('Save product error:', err);
+    } finally {
+      setIsSavingProduct(false);
     }
 
-    setIsProductModalOpen(false);
+    if (success) {
+      setIsProductModalOpen(false);
+    }
   };
 
   const handleExecuteExportAndReset = () => {
@@ -1333,9 +1346,17 @@ export const OwnerDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors"
+                  disabled={isSavingProduct}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  {t.saveProduct}
+                  {isSavingProduct ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F7E7A9]" />
+                      <span>{language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...'}</span>
+                    </>
+                  ) : (
+                    t.saveProduct
+                  )}
                 </button>
               </div>
             </form>

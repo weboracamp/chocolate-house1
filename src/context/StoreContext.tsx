@@ -6,6 +6,7 @@ import {
   Expense,
   ShiftReport,
   UserProfile,
+  UserRole,
   Language,
   CategoryType,
   OrderStatus,
@@ -69,9 +70,9 @@ interface StoreContextType {
   // Products
   products: Product[];
   lowStockProducts: Product[];
-  addProduct: (product: Omit<Product, 'id'>) => void;
-  updateProduct: (id: string, updates: Partial<Product>) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (product: Omit<Product, 'id'>) => Promise<boolean>;
+  updateProduct: (id: string, updates: Partial<Product>) => Promise<boolean>;
+  deleteProduct: (id: string) => Promise<boolean>;
   
   // Cart
   cart: CartItem[];
@@ -107,7 +108,7 @@ interface StoreContextType {
   
   // Auth
   currentUser: UserProfile | null;
-  login: (email: string, role: 'owner' | 'cashier', name?: string) => void;
+  login: (email: string, password?: string, role?: 'owner' | 'cashier', name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   
   // Toasts
@@ -273,6 +274,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (supabase) {
       const fetchInitialData = async () => {
+        try {
+          // 0. Fetch products through caching layer (TTL: 10 mins)
+          const { data: remoteProducts, fromCache: prodFromCache, error: prodError } = await cachedSupabaseQuery<Product[]>(
+            'products',
+            async () => {
+              const res = await supabase!
+                .from('products')
+                .select('*')
+                .order('created_at', { ascending: false });
+              return { data: res.data as Product[], error: res.error };
+            },
+            { table: 'products' }
+          );
+
+          if (!prodError && Array.isArray(remoteProducts)) {
+            setProducts(remoteProducts);
+            if (prodFromCache) {
+              console.info(`[StoreContext] ⚡ Loaded ${remoteProducts.length} products from client-side cache`);
+            } else {
+              console.info(`[StoreContext] 📦 Loaded ${remoteProducts.length} products from Supabase (empty table reflects as 0 items)`);
+            }
+          } else if (prodError) {
+            console.warn('[StoreContext] Failed fetching products from Supabase (network/server error):', prodError);
+          }
+        } catch (err) {
+          console.warn('Error loading products from Supabase via cache:', err);
+        }
+
         try {
           // 1. Fetch contact messages through caching layer (TTL: 3 mins)
           const { data: messages, fromCache: msgFromCache, error: msgError } = await cachedSupabaseQuery<ContactMessage[]>(
@@ -540,7 +569,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch (e) {
       console.error(e);
     }
-    return INITIAL_PRODUCTS;
+    // With Supabase configured, default to empty list so real DB data (even when 0 rows) is faithfully reflected
+    return supabase ? [] : INITIAL_PRODUCTS;
   });
 
   useEffect(() => {
@@ -550,31 +580,143 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Low stock products (stock <= 15)
   const lowStockProducts = products.filter((p) => p.stock <= 15);
 
-  const addProduct = (newProd: Omit<Product, 'id'>) => {
+  const addProduct = async (newProd: Omit<Product, 'id'>): Promise<boolean> => {
+    const newId = `prod-${Date.now()}`;
+    const now = new Date().toISOString();
     const product: Product = {
       ...newProd,
-      id: `prod-${Date.now()}`,
+      id: newId,
+      created_at: now,
+      updated_at: now,
     };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .insert({
+            id: product.id,
+            name_en: product.name_en,
+            name_ar: product.name_ar,
+            description_en: product.description_en || '',
+            description_ar: product.description_ar || '',
+            price: product.price,
+            discount_price: product.discount_price || null,
+            category: product.category,
+            stock: product.stock,
+            image: product.image,
+            is_best_seller: Boolean(product.is_best_seller),
+            is_new: Boolean(product.is_new),
+            created_at: now,
+            updated_at: now,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('[StoreContext] Supabase insert product error:', error);
+          showToast(
+            language === 'ar'
+              ? `فشل إضافة الصنف: ${error.message}`
+              : `Failed to add product: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+
+        if (data) {
+          setProducts((prev) => [data as Product, ...prev]);
+          invalidateCache('products');
+          showToast(language === 'ar' ? 'تمت إضافة الصنف بنجاح' : 'Product added successfully', 'success');
+          return true;
+        }
+      } catch (err: any) {
+        console.error('[StoreContext] Exception inserting product:', err);
+        showToast(`Error: ${err.message || err}`, 'error');
+        return false;
+      }
+    }
+
     setProducts((prev) => [product, ...prev]);
-    // Invalidate cached product queries so subsequent reads get fresh items
     invalidateCache('products');
     showToast(language === 'ar' ? 'تمت إضافة الصنف بنجاح' : 'Product added successfully', 'success');
+    return true;
   };
 
-  const updateProduct = (id: string, updates: Partial<Product>) => {
+  const updateProduct = async (id: string, updates: Partial<Product>): Promise<boolean> => {
+    const now = new Date().toISOString();
+
+    if (supabase) {
+      try {
+        const payload: Record<string, any> = { ...updates, updated_at: now };
+        if ('discount_price' in updates && updates.discount_price === undefined) {
+          payload.discount_price = null;
+        }
+
+        const { data, error } = await supabase
+          .from('products')
+          .update(payload)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('[StoreContext] Supabase update product error:', error);
+          showToast(
+            language === 'ar'
+              ? `فشل تعديل بيانات الصنف: ${error.message}`
+              : `Failed to update product: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+
+        setProducts((prev) =>
+          prev.map((p) => (p.id === id ? ((data as Product) || { ...p, ...updates, updated_at: now }) : p))
+        );
+        invalidateCache('products');
+        showToast(language === 'ar' ? 'تم تحديث بيانات الصنف بنجاح' : 'Product updated successfully', 'success');
+        return true;
+      } catch (err: any) {
+        console.error('[StoreContext] Exception updating product:', err);
+        showToast(`Error: ${err.message || err}`, 'error');
+        return false;
+      }
+    }
+
     setProducts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
+      prev.map((p) => (p.id === id ? { ...p, ...updates, updated_at: now } : p))
     );
-    // Invalidate cached product queries
     invalidateCache('products');
     showToast(language === 'ar' ? 'تم تحديث بيانات الصنف' : 'Product updated successfully', 'success');
+    return true;
   };
 
-  const deleteProduct = (id: string) => {
+  const deleteProduct = async (id: string): Promise<boolean> => {
+    if (supabase) {
+      try {
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        if (error) {
+          console.error('[StoreContext] Supabase delete product error:', error);
+          showToast(
+            language === 'ar'
+              ? `فشل حذف الصنف: ${error.message}`
+              : `Failed to delete product: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+      } catch (err: any) {
+        console.error('[StoreContext] Exception deleting product:', err);
+        showToast(`Error: ${err.message || err}`, 'error');
+        return false;
+      }
+    }
+
     setProducts((prev) => prev.filter((p) => p.id !== id));
-    // Invalidate cached product queries
     invalidateCache('products');
     showToast(language === 'ar' ? 'تم حذف الصنف' : 'Product deleted', 'info');
+    return true;
   };
 
   // 4. Cart State
@@ -1056,7 +1198,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   };
 
-  // 9. Auth State
+  // 9. Auth State & Real Supabase Session Management
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.USER);
@@ -1067,27 +1209,172 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return null;
   });
 
-  const login = (email: string, role: 'owner' | 'cashier', name?: string) => {
+  // Helper to map Supabase User to UserProfile by reading public.profiles
+  const resolveUserProfile = async (user: any): Promise<UserProfile> => {
+    let role: UserRole | null = null;
+    let name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'User';
+
+    if (supabase) {
+      try {
+        // 1. Direct lookup by user UUID in public.profiles table
+        const { data: profile, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, email, full_name, role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile?.role) {
+          role = profile.role as UserRole;
+          name = profile.full_name || name;
+          console.info(`[StoreContext] 👤 Resolved role "${role}" from public.profiles for ${user.email}`);
+        } else {
+          // 2. Fallback lookup by email in public.profiles
+          const { data: profileByEmail } = await supabase
+            .from('profiles')
+            .select('id, email, full_name, role')
+            .eq('email', user.email)
+            .maybeSingle();
+
+          if (profileByEmail?.role) {
+            role = profileByEmail.role as UserRole;
+            name = profileByEmail.full_name || name;
+            console.info(`[StoreContext] 👤 Resolved role "${role}" via email match in public.profiles`);
+          } else if (profileErr) {
+            console.warn('[StoreContext] Could not query public.profiles:', profileErr);
+          }
+        }
+      } catch (err) {
+        console.warn('[StoreContext] Exception resolving profile from public.profiles:', err);
+      }
+    }
+
+    // 3. Fallback if no public.profiles row exists
+    if (!role) {
+      if (user.user_metadata?.role) {
+        role = user.user_metadata.role as UserRole;
+      } else if (user.app_metadata?.role) {
+        role = user.app_metadata.role as UserRole;
+      } else if (user.email?.toLowerCase().includes('cashier')) {
+        role = 'cashier';
+      } else {
+        role = 'owner';
+      }
+    }
+
     const profile: UserProfile = {
-      id: `usr-${Date.now()}`,
-      email,
+      id: user.id,
+      email: user.email || '',
       role,
-      name: name || (role === 'owner' ? 'Store Manager' : 'Front Barista'),
+      name,
     };
+
     setCurrentUser(profile);
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
-    showToast(
-      language === 'ar'
-        ? `مرحباً بك، ${profile.name} (${role === 'owner' ? 'المالك' : 'الكاشير'})`
-        : `Welcome, ${profile.name} (${role})`,
-      'success'
-    );
+    return profile;
   };
 
-  const logout = () => {
+  // Sync Supabase Auth session on mount and listen to changes
+  useEffect(() => {
+    if (!supabase) return;
+
+    let mounted = true;
+
+    // Check existing active Supabase session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      if (session?.user) {
+        resolveUserProfile(session.user);
+      } else {
+        setCurrentUser(null);
+        localStorage.removeItem(STORAGE_KEYS.USER);
+      }
+    });
+
+    // Real-time auth state updates (e.g. login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (session?.user) {
+        resolveUserProfile(session.user);
+      } else {
+        setCurrentUser(null);
+        localStorage.removeItem(STORAGE_KEYS.USER);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const login = async (
+    email: string,
+    password?: string,
+    targetRole?: 'owner' | 'cashier',
+    name?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!supabase) {
+      return { success: false, error: 'Supabase client is not configured' };
+    }
+
+    if (!password) {
+      return { success: false, error: language === 'ar' ? 'كلمة المرور مطلوبة' : 'Password is required' };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        console.error('[StoreContext] Supabase signInWithPassword error:', error);
+        return { success: false, error: error.message };
+      }
+
+      if (data?.user) {
+        const profile = await resolveUserProfile(data.user);
+
+        // Enforce role authorization:
+        // If logging into Owner portal, user must have 'owner' role in public.profiles
+        if (targetRole === 'owner' && profile.role !== 'owner') {
+          return {
+            success: false,
+            error:
+              language === 'ar'
+                ? 'غير مصرح: حسابك مسجل بصلاحية كاشير (Cashier) ولا يملك إذن الوصول إلى لوحة تحكم المالك.'
+                : 'Unauthorized: Your account role is "cashier" and cannot access the Owner dashboard.',
+          };
+        }
+
+        showToast(
+          language === 'ar'
+            ? `مرحباً بك، ${profile.name} (${profile.role === 'owner' ? 'المالك' : 'الكاشير'})`
+            : `Welcome, ${profile.name} (${profile.role})`,
+          'success'
+        );
+        return { success: true };
+      }
+
+      return { success: false, error: 'Authentication failed' };
+    } catch (err: any) {
+      console.error('[StoreContext] Auth exception:', err);
+      return { success: false, error: err.message || 'Authentication failed' };
+    }
+  };
+
+  const logout = async () => {
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('[StoreContext] Sign out error:', err);
+      }
+    }
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.USER);
     showToast(language === 'ar' ? 'تم تسجيل الخروج بنجاح' : 'Signed out successfully', 'info');
+    handleSetActiveView('store');
   };
 
   // 10. Toasts

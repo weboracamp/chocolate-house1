@@ -44,6 +44,8 @@ export interface Product {
   is_best_seller?: boolean;
   is_new?: boolean;
   calories?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type OrderType = 'on-site' | 'pickup' | 'delivery';
