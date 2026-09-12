@@ -21,6 +21,7 @@ import {
   Copy,
   Check,
   Printer,
+  Receipt,
   Calendar,
   ExternalLink,
   Package,
@@ -279,6 +280,16 @@ export const OwnerDashboard: React.FC = () => {
           >
             <ExternalLink className="w-3.5 h-3.5" />
             <span>{language === 'ar' ? 'المتجر العام' : 'Public Store'}</span>
+          </button>
+
+          {/* Switch to Cashier View for Owner */}
+          <button
+            onClick={() => setActiveView('cashier')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
+            title="Switch to Cashier Terminal"
+          >
+            <Receipt className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <span>{language === 'ar' ? 'نظام الكاشير' : 'Cashier Terminal'}</span>
           </button>
 
           {/* Export & Reset CTA */}

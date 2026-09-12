@@ -14,20 +14,43 @@ import { ReceiptModal } from './components/ReceiptModal';
 import { AuthModal } from './components/AuthModal';
 import { CashierDashboard } from './components/CashierDashboard';
 import { OwnerDashboard } from './components/OwnerDashboard';
-import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, X, Loader2 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { activeView, currentUser, toasts = [], dismissToast } = useStore();
+  const { activeView, currentUser, isAuthLoading, toasts = [], dismissToast, language } = useStore();
+
+  const renderAuthLoading = () => (
+    <div className="min-h-screen w-full bg-[#1A0A06] flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative mb-4">
+        <div className="w-14 h-14 rounded-full border-2 border-[#D4AF37]/30 border-t-[#D4AF37] animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-[#D4AF37] animate-pulse" />
+        </div>
+      </div>
+      <p className="text-sm font-bold text-[#F7E7A9] tracking-wide">
+        {language === 'ar' ? 'جارٍ التحقق من صلاحيات الدخول...' : 'Verifying authentication session...'}
+      </p>
+      <p className="text-xs text-[#F7E7A9]/60 mt-1">
+        {language === 'ar' ? 'يرجى الانتظار لحظات' : 'Connecting securely to Chocolate House'}
+      </p>
+    </div>
+  );
 
   const renderView = () => {
     switch (activeView) {
       case 'owner':
+        if (isAuthLoading) {
+          return renderAuthLoading();
+        }
         if (!currentUser || currentUser.role !== 'owner') {
           return <AuthModal requiredRole="owner" />;
         }
         return <OwnerDashboard />;
 
       case 'cashier':
+        if (isAuthLoading) {
+          return renderAuthLoading();
+        }
         if (!currentUser || (currentUser.role !== 'cashier' && currentUser.role !== 'owner')) {
           return <AuthModal requiredRole="cashier" />;
         }

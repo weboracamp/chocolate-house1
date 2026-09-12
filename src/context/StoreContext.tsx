@@ -108,6 +108,7 @@ interface StoreContextType {
   
   // Auth
   currentUser: UserProfile | null;
+  isAuthLoading: boolean;
   login: (email: string, password?: string, role?: 'owner' | 'cashier', name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   
@@ -423,6 +424,48 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         } catch (err) {
           console.warn('Error loading orders from Supabase via cache:', err);
+        }
+
+        try {
+          // 4. Fetch expenses through caching layer (TTL: 3 mins)
+          const { data: remoteExpenses, error: expErr } = await cachedSupabaseQuery<Expense[]>(
+            'expenses',
+            async () => {
+              const res = await supabase!
+                .from('expenses')
+                .select('*')
+                .order('created_at', { ascending: false });
+              return { data: res.data as Expense[], error: res.error };
+            },
+            { table: 'expenses' }
+          );
+
+          if (!expErr && remoteExpenses && remoteExpenses.length > 0) {
+            setExpenses(remoteExpenses);
+          }
+        } catch (err) {
+          console.warn('Error loading expenses from Supabase via cache:', err);
+        }
+
+        try {
+          // 5. Fetch shift reports through caching layer (TTL: 3 mins)
+          const { data: remoteShifts, error: shiftErr } = await cachedSupabaseQuery<ShiftReport[]>(
+            'shift_reports',
+            async () => {
+              const res = await supabase!
+                .from('shift_reports')
+                .select('*')
+                .order('created_at', { ascending: false });
+              return { data: res.data as ShiftReport[], error: res.error };
+            },
+            { table: 'shift_reports' }
+          );
+
+          if (!shiftErr && remoteShifts && remoteShifts.length > 0) {
+            setShiftReports(remoteShifts);
+          }
+        } catch (err) {
+          console.warn('Error loading shift_reports from Supabase via cache:', err);
         }
       };
 
@@ -1037,6 +1080,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setExpenses((prev) => [expense, ...prev]);
     invalidateCache('expenses');
+
+    if (supabase) {
+      supabase
+        .from('expenses')
+        .insert({
+          id: expense.id,
+          title: expense.title,
+          category: expense.category,
+          amount: expense.amount,
+          notes: expense.notes || null,
+          cashier_name: expense.cashier_name,
+          created_at: expense.created_at,
+        })
+        .then(({ error }) => {
+          if (error) {
+            console.error('[StoreContext] Failed to insert expense into Supabase:', error);
+            showToast(
+              language === 'ar'
+                ? `تنبيه: تعذر مزامنة المصروف مع قاعدة البيانات: ${error.message}`
+                : `Warning: Could not sync expense with database: ${error.message}`,
+              'warning'
+            );
+          }
+        });
+    }
+
     showToast(
       language === 'ar'
         ? `تم تسجيل المصروف بقيمة ${expense.amount} ج.م`
@@ -1105,6 +1174,40 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setShiftReports((prev) => [report, ...prev]);
     invalidateCache('shift_reports');
+
+    if (supabase) {
+      supabase
+        .from('shift_reports')
+        .insert({
+          id: report.id,
+          shift_number: report.shift_number,
+          cashier_id: currentUser?.id || null,
+          cashier_name: report.cashier_name,
+          start_time: report.start_time,
+          end_time: report.end_time,
+          total_orders_count: report.total_orders_count,
+          total_sales: report.total_sales,
+          cash_sales: report.cash_sales,
+          digital_sales: report.digital_sales,
+          expenses_total: report.expenses_total,
+          system_expected_cash: report.system_expected_cash,
+          cashier_reported_cash: report.cashier_reported_cash,
+          discrepancy: report.discrepancy,
+          notes: report.notes || null,
+          created_at: report.created_at,
+        })
+        .then(({ error }) => {
+          if (error) {
+            console.error('[StoreContext] Failed to insert shift report into Supabase:', error);
+            showToast(
+              language === 'ar'
+                ? `تنبيه: تعذر حفظ تقرير الوردية بالسحابة: ${error.message}`
+                : `Warning: Could not sync shift report with database: ${error.message}`,
+              'warning'
+            );
+          }
+        });
+    }
 
     // Reset cashier daily view
     const nowIso = new Date().toISOString();
@@ -1199,20 +1302,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // 9. Auth State & Real Supabase Session Management
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.USER);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return null;
-  });
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(Boolean(supabase));
 
-  // Helper to map Supabase User to UserProfile by reading public.profiles
-  const resolveUserProfile = async (user: any): Promise<UserProfile> => {
+  // Helper to map Supabase User to UserProfile strictly reading public.profiles
+  const resolveUserProfile = async (user: any): Promise<UserProfile | null> => {
     let role: UserRole | null = null;
-    let name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'User';
+    let name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Staff';
 
     if (supabase) {
       try {
@@ -1223,24 +1319,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           .eq('id', user.id)
           .maybeSingle();
 
-        if (profile?.role) {
+        if (profile?.role && (profile.role === 'owner' || profile.role === 'cashier')) {
           role = profile.role as UserRole;
           name = profile.full_name || name;
-          console.info(`[StoreContext] 👤 Resolved role "${role}" from public.profiles for ${user.email}`);
+          console.info(`[StoreContext] 👤 Resolved verified role "${role}" from public.profiles for ${user.email}`);
         } else {
-          // 2. Fallback lookup by email in public.profiles
-          const { data: profileByEmail } = await supabase
+          // 2. Lookup by email in public.profiles if UUID didn't match
+          const { data: profileByEmail, error: emailErr } = await supabase
             .from('profiles')
             .select('id, email, full_name, role')
             .eq('email', user.email)
             .maybeSingle();
 
-          if (profileByEmail?.role) {
+          if (profileByEmail?.role && (profileByEmail.role === 'owner' || profileByEmail.role === 'cashier')) {
             role = profileByEmail.role as UserRole;
             name = profileByEmail.full_name || name;
-            console.info(`[StoreContext] 👤 Resolved role "${role}" via email match in public.profiles`);
-          } else if (profileErr) {
-            console.warn('[StoreContext] Could not query public.profiles:', profileErr);
+            console.info(`[StoreContext] 👤 Resolved verified role "${role}" via email in public.profiles for ${user.email}`);
+          } else if (profileErr || emailErr) {
+            console.warn('[StoreContext] Could not find authorized role in public.profiles:', profileErr || emailErr);
           }
         }
       } catch (err) {
@@ -1248,17 +1344,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
-    // 3. Fallback if no public.profiles row exists
+    // STRICT ZERO-TRUST RULE: If user has NO valid matching row in public.profiles with an explicit role, DENY access completely
     if (!role) {
-      if (user.user_metadata?.role) {
-        role = user.user_metadata.role as UserRole;
-      } else if (user.app_metadata?.role) {
-        role = user.app_metadata.role as UserRole;
-      } else if (user.email?.toLowerCase().includes('cashier')) {
-        role = 'cashier';
-      } else {
-        role = 'owner';
-      }
+      console.warn(`[StoreContext] ⛔ Access Denied: User ${user.email} (${user.id}) has no valid role in public.profiles`);
+      return null;
     }
 
     const profile: UserProfile = {
@@ -1268,37 +1357,93 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       name,
     };
 
-    setCurrentUser(profile);
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
     return profile;
   };
 
   // Sync Supabase Auth session on mount and listen to changes
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
 
     let mounted = true;
 
     // Check existing active Supabase session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!mounted) return;
-      if (session?.user) {
-        resolveUserProfile(session.user);
-      } else {
-        setCurrentUser(null);
-        localStorage.removeItem(STORAGE_KEYS.USER);
-      }
-    });
+    supabase.auth
+      .getSession()
+      .then(async ({ data: { session }, error }) => {
+        if (!mounted) return;
+        if (session?.user && !error) {
+          try {
+            const profile = await resolveUserProfile(session.user);
+            if (profile) {
+              if (mounted) {
+                setCurrentUser(profile);
+                localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
+              }
+            } else {
+              // Unregistered user with no profile row - sign them out immediately
+              await supabase.auth.signOut();
+              if (mounted) {
+                setCurrentUser(null);
+                localStorage.removeItem(STORAGE_KEYS.USER);
+              }
+            }
+          } catch (e) {
+            console.warn('[StoreContext] Failed to resolve user profile:', e);
+            if (mounted) {
+              setCurrentUser(null);
+              localStorage.removeItem(STORAGE_KEYS.USER);
+            }
+          }
+        } else {
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_KEYS.USER);
+        }
+        if (mounted) setIsAuthLoading(false);
+      })
+      .catch((err) => {
+        console.warn('[StoreContext] getSession error:', err);
+        if (mounted) {
+          setCurrentUser(null);
+          setIsAuthLoading(false);
+        }
+      });
 
     // Real-time auth state updates (e.g. login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return;
       if (session?.user) {
-        resolveUserProfile(session.user);
+        try {
+          const profile = await resolveUserProfile(session.user);
+          if (profile) {
+            if (mounted) {
+              setCurrentUser(profile);
+              localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
+            }
+          } else {
+            // Unauthorized user without an explicit role row - reject and sign out
+            await supabase.auth.signOut();
+            if (mounted) {
+              setCurrentUser(null);
+              localStorage.removeItem(STORAGE_KEYS.USER);
+            }
+          }
+        } catch (e) {
+          console.warn('[StoreContext] onAuthStateChange profile resolution error:', e);
+          if (mounted) {
+            setCurrentUser(null);
+            localStorage.removeItem(STORAGE_KEYS.USER);
+          }
+        }
       } else {
         setCurrentUser(null);
         localStorage.removeItem(STORAGE_KEYS.USER);
       }
+      if (mounted) setIsAuthLoading(false);
     });
 
     return () => {
@@ -1335,9 +1480,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (data?.user) {
         const profile = await resolveUserProfile(data.user);
 
+        // Zero-trust check: User MUST have a matching row in public.profiles with role 'owner' or 'cashier'
+        if (!profile) {
+          await supabase.auth.signOut();
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_KEYS.USER);
+          return {
+            success: false,
+            error:
+              language === 'ar'
+                ? 'الحساب غير مصرح له بالدخول: لم يتم العثور على دور مخصص لحسابك في قاعدة البيانات (public.profiles).'
+                : 'Account not authorized: No valid role found in public.profiles. Access denied.',
+          };
+        }
+
         // Enforce role authorization:
-        // If logging into Owner portal, user must have 'owner' role in public.profiles
+        // 1. If logging into Owner portal, user must have 'owner' role in public.profiles
         if (targetRole === 'owner' && profile.role !== 'owner') {
+          await supabase.auth.signOut();
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_KEYS.USER);
           return {
             success: false,
             error:
@@ -1346,6 +1508,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 : 'Unauthorized: Your account role is "cashier" and cannot access the Owner dashboard.',
           };
         }
+
+        // 2. If logging into Cashier portal, user must have 'cashier' OR 'owner' role
+        if (targetRole === 'cashier' && profile.role !== 'cashier' && profile.role !== 'owner') {
+          await supabase.auth.signOut();
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_KEYS.USER);
+          return {
+            success: false,
+            error:
+              language === 'ar'
+                ? 'غير مصرح: ليس لديك صلاحية الوصول إلى نظام الكاشير.'
+                : 'Unauthorized: You do not have permission to access the Cashier terminal.',
+          };
+        }
+
+        setCurrentUser(profile);
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
 
         showToast(
           language === 'ar'
@@ -1438,6 +1617,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         endShiftAndReconcile,
         exportAndResetMonthlyData,
         currentUser,
+        isAuthLoading,
         login,
         logout,
         toasts,

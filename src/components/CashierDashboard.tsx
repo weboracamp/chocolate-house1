@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { OrderStatus, Expense } from '../types';
+import { OrderStatus, Expense, Product, OrderType, PaymentMethod } from '../types';
+import { AuthModal } from './AuthModal';
 import {
   Banknote,
   CreditCard,
@@ -19,25 +20,79 @@ import {
   Printer,
   ShoppingBag,
   ExternalLink,
+  Search,
+  Package,
+  Layers,
+  Trash2,
+  Minus,
+  MapPin,
+  Check,
+  AlertTriangle,
+  Loader2,
+  ShieldAlert,
 } from 'lucide-react';
+
+interface PosCartItem {
+  product: Product;
+  quantity: number;
+}
 
 export const CashierDashboard: React.FC = () => {
   const {
     language,
     t,
+    products,
     dailyOrders,
     dailyExpenses,
+    placeOrder,
     addExpense,
     endShiftAndReconcile,
     updateOrderStatus,
     setActiveReceiptOrder,
     currentUser,
+    isAuthLoading,
     logout,
     setActiveView,
+    showToast,
   } = useStore();
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState<'orders' | 'expenses' | 'pos'>('orders');
+  // 1. Strict Role & Auth Guard
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#1A0A06] flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#D4AF37] mb-3" />
+        <p className="text-sm font-semibold text-[#F7E7A9]">
+          {language === 'ar' ? 'جارٍ التحقق من صلاحيات الكاشير...' : 'Verifying cashier credentials...'}
+        </p>
+      </div>
+    );
+  }
+
+  if (!currentUser || (currentUser.role !== 'cashier' && currentUser.role !== 'owner')) {
+    return <AuthModal requiredRole="cashier" />;
+  }
+
+  // 2. Active Tab State: POS (New Order), Shift Orders, Menu & Stock (Read-Only), Shift Expenses
+  const [activeTab, setActiveTab] = useState<'pos' | 'orders' | 'products' | 'expenses'>('pos');
+
+  // POS Order Taking State
+  const [posCart, setPosCart] = useState<PosCartItem[]>([]);
+  const [posCategory, setPosCategory] = useState<string>('all');
+  const [posSearch, setPosSearch] = useState<string>('');
+  const [posOrderType, setPosOrderType] = useState<OrderType>('on-site');
+  const [posPaymentMethod, setPosPaymentMethod] = useState<PaymentMethod>('cod');
+  const [posCustomerName, setPosCustomerName] = useState<string>('');
+  const [posCustomerPhone, setPosCustomerPhone] = useState<string>('');
+  const [posTableNumber, setPosTableNumber] = useState<string>('');
+  const [posDeliveryAddress, setPosDeliveryAddress] = useState<string>('');
+  const [posPickupTime, setPosPickupTime] = useState<string>('15-20 Mins');
+  const [posTransferPhone, setPosTransferPhone] = useState<string>('');
+  const [posNotes, setPosNotes] = useState<string>('');
+  const [posErrors, setPosErrors] = useState<Record<string, string>>({});
+
+  // Products (Read-Only) Tab Filter State
+  const [prodSearch, setProdSearch] = useState<string>('');
+  const [prodCategory, setProdCategory] = useState<string>('all');
 
   // Expense Modal State
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -66,8 +121,183 @@ export const CashierDashboard: React.FC = () => {
 
   const totalShiftExpenses = dailyExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-  // Crucial requirement: Digital payments add to Total Revenue but do NOT add to physical drawer cash
+  // Expected Physical Drawer Cash: Cash Orders Sales - Cash Expenses (Digital payments excluded)
   const expectedPhysicalDrawerCash = Math.max(0, cashOrdersSales - totalShiftExpenses);
+
+  // POS Helper Functions
+  const handleAddToPosCart = (product: Product) => {
+    if (product.stock <= 0) {
+      showToast(
+        language === 'ar' ? 'هذا الصنف غير متوفر حالياً بالمخزون' : 'This item is currently out of stock',
+        'warning'
+      );
+      return;
+    }
+
+    setPosCart((prev) => {
+      const existing = prev.find((item) => item.product.id === product.id);
+      if (existing) {
+        if (existing.quantity >= product.stock) {
+          showToast(
+            language === 'ar'
+              ? `الكمية القصوى المتاحة بالمخزون هي ${product.stock}`
+              : `Maximum available stock is ${product.stock}`,
+            'warning'
+          );
+          return prev;
+        }
+        return prev.map((item) =>
+          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+      return [...prev, { product, quantity: 1 }];
+    });
+  };
+
+  const handleUpdatePosQuantity = (productId: string, delta: number) => {
+    setPosCart((prev) => {
+      return prev
+        .map((item) => {
+          if (item.product.id === productId) {
+            const newQty = item.quantity + delta;
+            if (newQty <= 0) return null;
+            if (newQty > item.product.stock) {
+              showToast(
+                language === 'ar'
+                  ? `الكمية القصوى المتاحة بالمخزون هي ${item.product.stock}`
+                  : `Maximum available stock is ${item.product.stock}`,
+                'warning'
+              );
+              return item;
+            }
+            return { ...item, quantity: newQty };
+          }
+          return item;
+        })
+        .filter(Boolean) as PosCartItem[];
+    });
+  };
+
+  const handleRemoveFromPosCart = (productId: string) => {
+    setPosCart((prev) => prev.filter((item) => item.product.id !== productId));
+  };
+
+  const posSubtotal = posCart.reduce((sum, item) => {
+    const price = item.product.discount_price || item.product.price;
+    return sum + price * item.quantity;
+  }, 0);
+
+  const posDiscount = posCart.reduce((sum, item) => {
+    if (item.product.discount_price && item.product.discount_price < item.product.price) {
+      return sum + (item.product.price - item.product.discount_price) * item.quantity;
+    }
+    return sum;
+  }, 0);
+
+  const posDeliveryFee = posOrderType === 'delivery' ? 25 : 0;
+  const posTotal = posSubtotal + posDeliveryFee;
+
+  const handleCreatePosOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPosErrors({});
+
+    if (posCart.length === 0) {
+      showToast(
+        language === 'ar' ? 'يرجى اختيار صنف واحد على الأقل للطلب' : 'Please select at least one item for the order',
+        'warning'
+      );
+      return;
+    }
+
+    const errors: Record<string, string> = {};
+
+    const trimmedName = posCustomerName.trim() || (language === 'ar' ? 'عميل صالة' : 'Walk-in Guest');
+    const trimmedPhone = posCustomerPhone.trim() || '01000000000';
+
+    if (posOrderType === 'on-site' && !posTableNumber.trim()) {
+      errors.tableNumber = language === 'ar' ? 'يرجى إدخال رقم الطاولة' : 'Please specify table number';
+    }
+
+    if (posOrderType === 'delivery' && !posDeliveryAddress.trim()) {
+      errors.deliveryAddress = language === 'ar' ? 'يرجى إدخال عنوان التوصيل' : 'Delivery address is required';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setPosErrors(errors);
+      return;
+    }
+
+    const orderItems = posCart.map((item) => {
+      const unitPrice = item.product.discount_price || item.product.price;
+      return {
+        product_id: item.product.id,
+        product_name_en: item.product.name_en,
+        product_name_ar: item.product.name_ar,
+        quantity: item.quantity,
+        unit_price: unitPrice,
+        total_price: unitPrice * item.quantity,
+        image: item.product.image,
+      };
+    });
+
+    const newOrder = placeOrder({
+      order_type: posOrderType,
+      customer_name: trimmedName,
+      customer_phone: trimmedPhone,
+      table_number: posOrderType === 'on-site' ? posTableNumber.trim() : undefined,
+      delivery_address: posOrderType === 'delivery' ? posDeliveryAddress.trim() : undefined,
+      pickup_time: posOrderType === 'pickup' ? posPickupTime : undefined,
+      notes: posNotes.trim() ? `${posNotes.trim()} (Taken by Cashier: ${currentUser.name})` : `(Cashier: ${currentUser.name})`,
+      payment_method: posPaymentMethod,
+      transfer_from_phone: posPaymentMethod === 'instapay_wallet' ? posTransferPhone.trim() : undefined,
+      amount_transferred: posPaymentMethod === 'instapay_wallet' ? posTotal : undefined,
+      items: orderItems,
+      subtotal: posSubtotal,
+      delivery_fee: posDeliveryFee,
+      discount_total: posDiscount,
+      total: posTotal,
+      is_archived: false,
+    });
+
+    if (newOrder) {
+      // Clear POS state
+      setPosCart([]);
+      setPosTableNumber('');
+      setPosDeliveryAddress('');
+      setPosCustomerName('');
+      setPosCustomerPhone('');
+      setPosNotes('');
+      setPosTransferPhone('');
+    }
+  };
+
+  // Filtered Products for POS
+  const filteredPosProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesCategory = posCategory === 'all' || p.category === posCategory;
+      const q = posSearch.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        p.name_en.toLowerCase().includes(q) ||
+        p.name_ar.includes(q) ||
+        p.category.toLowerCase().includes(q);
+      return matchesCategory && matchesSearch;
+    });
+  }, [products, posCategory, posSearch]);
+
+  // Filtered Products for Read-Only Stock View
+  const filteredStockProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesCategory = prodCategory === 'all' || p.category === prodCategory;
+      const q = prodSearch.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        p.name_en.toLowerCase().includes(q) ||
+        p.name_ar.includes(q) ||
+        p.category.toLowerCase().includes(q);
+      return matchesCategory && matchesSearch;
+    });
+  }, [products, prodCategory, prodSearch]);
 
   const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +309,7 @@ export const CashierDashboard: React.FC = () => {
       category: expCategory,
       amount,
       notes: expNotes.trim() || undefined,
-      cashier_name: currentUser?.name || 'Cashier Barista',
+      cashier_name: currentUser?.name || 'Cashier',
     });
 
     setExpTitle('');
@@ -95,20 +325,30 @@ export const CashierDashboard: React.FC = () => {
 
     const report = endShiftAndReconcile(
       physicalAmount,
-      currentUser?.name || 'Shift Cashier',
+      currentUser?.name || 'Cashier',
       shiftNotes.trim() || undefined
     );
 
     setShiftCompletedReport(report);
   };
 
+  const categoriesList = [
+    { id: 'all', labelEn: 'All Categories', labelAr: 'جميع الأقسام' },
+    { id: 'hot_chocolate', labelEn: 'Hot Chocolate', labelAr: 'الشوكولاتة الساخنة' },
+    { id: 'molten_cakes', labelEn: 'Molten Cakes', labelAr: 'المولتن كيك' },
+    { id: 'crepes_waffles', labelEn: 'Crepes & Waffles', labelAr: 'كريب ووافل' },
+    { id: 'iced_beverages', labelEn: 'Iced Drinks', labelAr: 'المشروبات المثلجة' },
+    { id: 'dessert_boxes', labelEn: 'Dessert Boxes', labelAr: 'علب وبوكسات الحلى' },
+    { id: 'chocolate_bars', labelEn: 'Chocolate Bars', labelAr: 'ألواح الشوكولاتة' },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F4ECDF] text-[#2B140E] flex flex-col">
-      {/* Cashier Top Navigation Bar */}
+    <div className="min-h-screen bg-[#F4ECDF] text-[#2B140E] flex flex-col selection:bg-[#D4AF37] selection:text-[#1A0A06]">
+      {/* 1. Header Bar */}
       <header
         className="w-full px-4 py-3 border-b flex items-center justify-between shadow-md"
         style={{
-          backgroundColor: 'var(--color-chocolate)',
+          backgroundColor: 'var(--color-chocolate, #2B140E)',
           borderColor: 'rgba(212, 175, 55, 0.3)',
         }}
       >
@@ -125,23 +365,32 @@ export const CashierDashboard: React.FC = () => {
               </span>
             </h1>
             <p className="text-xs text-[#D4AF37]">
-              {currentUser?.name || 'Front Cashier'} • {new Date().toLocaleDateString()}
+              {currentUser?.name || 'Cashier'} • {new Date().toLocaleDateString()}
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Header Action Controls */}
         <div className="flex items-center gap-2">
-          {/* Back to Public Menu */}
+          {currentUser?.role === 'owner' && (
+            <button
+              onClick={() => setActiveView('owner')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
+              title="Return to Owner Dashboard"
+            >
+              <span>{language === 'ar' ? 'لوحة المالك' : 'Owner Portal'}</span>
+            </button>
+          )}
+
           <button
             onClick={() => setActiveView('store')}
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-[#F7E7A9] hover:bg-white/20 transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span>{language === 'ar' ? 'عرض المتجر' : 'Public Store'}</span>
+            <span>{language === 'ar' ? 'المتجر العام' : 'Public Store'}</span>
           </button>
 
-          {/* End Shift CTA */}
+          {/* End Shift Reconciliation Button */}
           <button
             id="cashier-end-shift-btn"
             onClick={() => {
@@ -150,17 +399,16 @@ export const CashierDashboard: React.FC = () => {
               setShiftCompletedReport(null);
               setIsShiftModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all active:scale-95 text-[#1A0A06]"
             style={{
               background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
-              color: '#1A0A06',
             }}
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>{t.endShiftReset}</span>
           </button>
 
-          {/* Logout */}
+          {/* Sign Out */}
           <button
             onClick={logout}
             className="p-1.5 rounded-lg text-red-300 hover:text-white hover:bg-red-900/30 transition-colors"
@@ -171,14 +419,14 @@ export const CashierDashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 flex-1">
-        {/* 1. FINANCIAL TRACKING SUMMARY CARDS (Strict Business Logic) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Total Revenue */}
+      {/* 2. Main Content Container */}
+      <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-5 flex-1">
+        {/* FINANCIAL SUMMARY CARDS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* Total Shift Revenue */}
           <div className="p-4 rounded-2xl bg-white border border-[#D4AF37]/30 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 {t.totalRevenue}
               </p>
               <div className="flex items-baseline gap-1 mt-1">
@@ -188,18 +436,18 @@ export const CashierDashboard: React.FC = () => {
                 <span className="text-xs font-bold text-[#8C6212]">{t.priceCurrency}</span>
               </div>
               <span className="text-[10px] text-gray-400">
-                {validDailyOrders.length} {language === 'ar' ? 'طلب اليوم' : 'orders today'}
+                {validDailyOrders.length} {language === 'ar' ? 'طلب بالوردية' : 'shift orders'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-[#2B140E] text-[#D4AF37]">
-              <TrendingUp className="w-6 h-6" />
+              <TrendingUp className="w-5 h-5" />
             </div>
           </div>
 
-          {/* Digital Payments (InstaPay / Wallets) */}
+          {/* Electronic Payments (InstaPay / Wallets) */}
           <div className="p-4 rounded-2xl bg-white border border-[#D4AF37]/30 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 {t.digitalPayments}
               </p>
               <div className="flex items-baseline gap-1 mt-1">
@@ -209,18 +457,18 @@ export const CashierDashboard: React.FC = () => {
                 <span className="text-xs font-bold text-blue-700">{t.priceCurrency}</span>
               </div>
               <span className="text-[10px] text-blue-600 font-medium">
-                {language === 'ar' ? 'مدفوعة عبر إنستاباي/المحافظ' : 'Direct to Bank / Wallet'}
+                {language === 'ar' ? 'محافظ / إنستاباي إلكترونية' : 'Bank / Wallet'}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
-              <CreditCard className="w-6 h-6" />
+              <CreditCard className="w-5 h-5" />
             </div>
           </div>
 
-          {/* Cash Drawer Expected (Physical Cash Only minus Expenses) */}
-          <div className="p-4 rounded-2xl bg-white border-2 border-[#D4AF37] shadow-md flex items-center justify-between relative overflow-hidden">
+          {/* Expected Drawer Cash (Cash Only Minus Expenses) */}
+          <div className="p-4 rounded-2xl bg-white border-2 border-[#D4AF37] shadow-xs flex items-center justify-between relative overflow-hidden">
             <div>
-              <p className="text-xs font-bold text-[#2B140E] uppercase tracking-wider flex items-center gap-1">
+              <p className="text-[11px] font-bold text-[#2B140E] uppercase tracking-wider flex items-center gap-1">
                 <Banknote className="w-3.5 h-3.5 text-[#D4AF37]" />
                 <span>{t.cashDrawerExpected}</span>
               </p>
@@ -235,14 +483,14 @@ export const CashierDashboard: React.FC = () => {
               </span>
             </div>
             <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <DollarSign className="w-6 h-6" />
+              <DollarSign className="w-5 h-5" />
             </div>
           </div>
 
           {/* Shift Expenses */}
           <div className="p-4 rounded-2xl bg-white border border-[#D4AF37]/30 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 {t.externalExpenses}
               </p>
               <div className="flex items-baseline gap-1 mt-1">
@@ -260,47 +508,508 @@ export const CashierDashboard: React.FC = () => {
               className="p-3 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
               title={t.addExpense}
             >
-              <Plus className="w-6 h-6" />
+              <Plus className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* 2. TAB CONTROLS & ACTION BUTTONS */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#D4AF37]/30 pb-3">
-          <div className="flex items-center gap-2">
+        {/* TAB CONTROLS */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#D4AF37]/30 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 1. POS New Order Tab */}
             <button
-              onClick={() => setActiveTab('orders')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                activeTab === 'orders'
-                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md'
+              onClick={() => setActiveTab('pos')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'pos'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md ring-2 ring-[#D4AF37]'
                   : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
               }`}
             >
+              <ShoppingBag className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <span>{language === 'ar' ? 'إنشاء طلب جديد (POS)' : 'New Order (POS)'}</span>
+              {posCart.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-[#D4AF37] text-[#1A0A06] text-[10px] font-black">
+                  {posCart.reduce((sum, i) => sum + i.quantity, 0)}
+                </span>
+              )}
+            </button>
+
+            {/* 2. Shift Orders Tab */}
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'orders'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md ring-2 ring-[#D4AF37]'
+                  : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5 text-[#D4AF37]" />
               <span>{t.dailyOrders} ({dailyOrders.length})</span>
             </button>
 
+            {/* 3. Products List (Read-Only) Tab */}
             <button
-              onClick={() => setActiveTab('expenses')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                activeTab === 'expenses'
-                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md'
+              onClick={() => setActiveTab('products')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'products'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md ring-2 ring-[#D4AF37]'
                   : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
               }`}
             >
+              <Layers className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <span>{language === 'ar' ? 'الأصناف والمخزون (للقراءة)' : 'Menu & Stock (Read-Only)'}</span>
+            </button>
+
+            {/* 4. Shift Expenses Tab */}
+            <button
+              onClick={() => setActiveTab('expenses')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'expenses'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md ring-2 ring-[#D4AF37]'
+                  : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5 text-[#D4AF37]" />
               <span>{t.externalExpenses} ({dailyExpenses.length})</span>
             </button>
           </div>
 
+          {/* Quick Expense Action Button */}
           <button
             onClick={() => setIsExpenseModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors shadow-xs"
           >
             <Plus className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>{t.addExpense}</span>
           </button>
         </div>
 
-        {/* 3. TAB 1: DAILY ORDERS STREAM */}
+        {/* TAB 1: POS / NEW ORDER TAKING TERMINAL */}
+        {activeTab === 'pos' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* Left: Product Catalog Selection (7 Cols on desktop) */}
+            <div className="lg:col-span-7 space-y-4">
+              {/* Filter and Search Bar */}
+              <div className="p-3.5 rounded-2xl bg-white border border-[#D4AF37]/25 shadow-xs space-y-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={posSearch}
+                    onChange={(e) => setPosSearch(e.target.value)}
+                    placeholder={language === 'ar' ? 'بحث سريع عن صنف...' : 'Quick search item...'}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/25 text-xs text-[#2B140E] placeholder-gray-400 focus:outline-hidden focus:border-[#D4AF37]"
+                  />
+                </div>
+
+                {/* Category Pills */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                  {categoriesList.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setPosCategory(cat.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                        posCategory === cat.id
+                          ? 'bg-[#2B140E] text-[#F7E7A9]'
+                          : 'bg-[#FFFBF5] text-[#2B140E] hover:bg-gray-100 border border-[#D4AF37]/20'
+                      }`}
+                    >
+                      {language === 'ar' ? cat.labelAr : cat.labelEn}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Products Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {filteredPosProducts.map((product) => {
+                  const isOutOfStock = product.stock <= 0;
+                  const price = product.discount_price || product.price;
+
+                  return (
+                    <div
+                      key={product.id}
+                      onClick={() => !isOutOfStock && handleAddToPosCart(product)}
+                      className={`p-3 rounded-2xl border transition-all flex flex-col justify-between select-none ${
+                        isOutOfStock
+                          ? 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
+                          : 'bg-white border-[#D4AF37]/25 hover:border-[#D4AF37] hover:shadow-md cursor-pointer active:scale-98'
+                      }`}
+                    >
+                      <div>
+                        {/* Image Thumbnail */}
+                        <div className="w-full h-24 rounded-xl overflow-hidden bg-[#2B140E]/5 mb-2 relative">
+                          {product.image ? (
+                            <img
+                              src={product.image}
+                              alt={product.name_en}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-300">
+                              <Package className="w-6 h-6" />
+                            </div>
+                          )}
+                          {/* Stock Pill Badge */}
+                          <div className="absolute top-1.5 right-1.5">
+                            <span
+                              className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${
+                                isOutOfStock
+                                  ? 'bg-rose-600 text-white'
+                                  : product.stock <= 10
+                                  ? 'bg-amber-500 text-white'
+                                  : 'bg-emerald-600 text-white'
+                              }`}
+                            >
+                              {isOutOfStock
+                                ? language === 'ar' ? 'نفد' : 'Out'
+                                : `${product.stock} ${language === 'ar' ? 'متاح' : 'left'}`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Product Title */}
+                        <h4 className="text-xs font-bold text-[#2B140E] line-clamp-1">
+                          {language === 'ar' ? product.name_ar : product.name_en}
+                        </h4>
+                        <p className="text-[10px] text-gray-400 capitalize">
+                          {product.category.replace('_', ' ')}
+                        </p>
+                      </div>
+
+                      {/* Price & Add Indicator */}
+                      <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-100">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xs font-black text-[#2B140E]">
+                            {price}
+                          </span>
+                          <span className="text-[10px] text-[#8C6212] font-bold">EGP</span>
+                        </div>
+                        <div className="w-6 h-6 rounded-lg bg-[#2B140E] text-[#F7E7A9] flex items-center justify-center">
+                          <Plus className="w-3.5 h-3.5" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredPosProducts.length === 0 && (
+                <div className="p-8 rounded-2xl bg-white border border-[#D4AF37]/20 text-center text-xs text-gray-500">
+                  {language === 'ar' ? 'لا توجد منتجات تطابق البحث' : 'No items match your search'}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Active Order Ticket & Checkout (5 Cols on desktop) */}
+            <div className="lg:col-span-5 bg-white rounded-3xl border-2 border-[#D4AF37]/40 shadow-xl p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-[#2B140E] text-[#D4AF37]">
+                    <Receipt className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-[#2B140E]">
+                      {language === 'ar' ? 'تذكرة الطلب الحالي' : 'Active Order Ticket'}
+                    </h3>
+                    <p className="text-[10px] text-gray-400">
+                      {posCart.length} {language === 'ar' ? 'أصناف محددة' : 'items selected'}
+                    </p>
+                  </div>
+                </div>
+
+                {posCart.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPosCart([])}
+                    className="text-[10px] font-bold text-rose-600 hover:text-rose-800"
+                  >
+                    {language === 'ar' ? 'إفراغ السلة' : 'Clear Ticket'}
+                  </button>
+                )}
+              </div>
+
+              {/* Cart Items List */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {posCart.length === 0 ? (
+                  <div className="py-8 text-center text-gray-400 space-y-1">
+                    <ShoppingBag className="w-8 h-8 mx-auto opacity-30 text-[#D4AF37]" />
+                    <p className="text-xs">
+                      {language === 'ar' ? 'انقر على الأصناف من القائمة لإضافتها للطلب' : 'Click items from menu to add to ticket'}
+                    </p>
+                  </div>
+                ) : (
+                  posCart.map((item) => {
+                    const unitPrice = item.product.discount_price || item.product.price;
+                    const itemTotal = unitPrice * item.quantity;
+                    return (
+                      <div
+                        key={item.product.id}
+                        className="p-2.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/20 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-[#2B140E] truncate">
+                            {language === 'ar' ? item.product.name_ar : item.product.name_en}
+                          </p>
+                          <p className="text-[10px] text-[#8C6212] font-semibold font-mono">
+                            {unitPrice} EGP
+                          </p>
+                        </div>
+
+                        {/* Quantity Controls */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePosQuantity(item.product.id, -1)}
+                            className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300 text-[#2B140E] flex items-center justify-center text-xs"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-mono font-bold w-5 text-center">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePosQuantity(item.product.id, 1)}
+                            className="w-6 h-6 rounded-lg bg-[#2B140E] hover:bg-[#1A0A06] text-[#F7E7A9] flex items-center justify-center text-xs"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-mono font-black text-[#2B140E] w-14 text-right">
+                            {itemTotal} EGP
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFromPosCart(item.product.id)}
+                            className="text-gray-400 hover:text-rose-600 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Order Form Settings */}
+              <form onSubmit={handleCreatePosOrder} className="space-y-3 pt-2 border-t border-gray-100">
+                {/* 1. Order Type Switcher */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                    {language === 'ar' ? 'نوع الطلب' : 'Order Type'}
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType('on-site')}
+                      className={`py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                        posOrderType === 'on-site'
+                          ? 'bg-[#2B140E] text-[#F7E7A9]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {t.onSite}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType('pickup')}
+                      className={`py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                        posOrderType === 'pickup'
+                          ? 'bg-[#2B140E] text-[#F7E7A9]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {t.pickup}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType('delivery')}
+                      className={`py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                        posOrderType === 'delivery'
+                          ? 'bg-[#2B140E] text-[#F7E7A9]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {t.delivery}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Conditional fields based on order type */}
+                {posOrderType === 'on-site' && (
+                  <div>
+                    <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                      {t.tableNumber} *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={posTableNumber}
+                      onChange={(e) => setPosTableNumber(e.target.value)}
+                      placeholder={language === 'ar' ? 'رقم الطاولة (مثال: T-4)' : 'Table # (e.g. T-4)'}
+                      className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden"
+                    />
+                    {posErrors.tableNumber && (
+                      <p className="text-[10px] text-rose-600 mt-0.5">{posErrors.tableNumber}</p>
+                    )}
+                  </div>
+                )}
+
+                {posOrderType === 'delivery' && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                        {language === 'ar' ? 'عنوان التوصيل' : 'Delivery Address'} *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={posDeliveryAddress}
+                        onChange={(e) => setPosDeliveryAddress(e.target.value)}
+                        placeholder={language === 'ar' ? 'الشارع، رقم العمارة، علامة مميزة' : 'Street, building, landmark'}
+                        className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden"
+                      />
+                      {posErrors.deliveryAddress && (
+                        <p className="text-[10px] text-rose-600 mt-0.5">{posErrors.deliveryAddress}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Customer Details */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-600 block mb-1">
+                      {language === 'ar' ? 'اسم العميل' : 'Customer Name'}
+                    </label>
+                    <input
+                      type="text"
+                      value={posCustomerName}
+                      onChange={(e) => setPosCustomerName(e.target.value)}
+                      placeholder={language === 'ar' ? 'عميل صالة' : 'Walk-in'}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-600 block mb-1">
+                      {language === 'ar' ? 'رقم الهاتف' : 'Phone Number'}
+                    </label>
+                    <input
+                      type="tel"
+                      value={posCustomerPhone}
+                      onChange={(e) => setPosCustomerPhone(e.target.value)}
+                      placeholder="010xxxxxxxx"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 text-xs font-mono focus:border-[#D4AF37] focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                {/* Payment Method Switcher */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                    {language === 'ar' ? 'طريقة الدفع' : 'Payment Method'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPosPaymentMethod('cod')}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                        posPaymentMethod === 'cod'
+                          ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                          : 'bg-gray-50 border-gray-200 text-gray-600'
+                      }`}
+                    >
+                      <Banknote className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'نقداً (كاش)' : 'Cash'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPosPaymentMethod('instapay_wallet')}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                        posPaymentMethod === 'instapay_wallet'
+                          ? 'bg-blue-50 border-blue-500 text-blue-800'
+                          : 'bg-gray-50 border-gray-200 text-gray-600'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'إنستاباي / محفظة' : 'InstaPay'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {posPaymentMethod === 'instapay_wallet' && (
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-600 block mb-1">
+                      {language === 'ar' ? 'رقم المحول منه' : 'Sender Phone / InstaPay ID'}
+                    </label>
+                    <input
+                      type="text"
+                      value={posTransferPhone}
+                      onChange={(e) => setPosTransferPhone(e.target.value)}
+                      placeholder="01112437437"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 text-xs font-mono focus:border-[#D4AF37] focus:outline-hidden"
+                    />
+                  </div>
+                )}
+
+                {/* Notes */}
+                <div>
+                  <label className="text-[10px] font-bold text-gray-600 block mb-1">
+                    {language === 'ar' ? 'ملاحظات التحضير' : 'Preparation Notes'}
+                  </label>
+                  <input
+                    type="text"
+                    value={posNotes}
+                    onChange={(e) => setPosNotes(e.target.value)}
+                    placeholder={language === 'ar' ? 'سكر خفيف، بدون كريمة...' : 'Less sugar, extra hot...'}
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden"
+                  />
+                </div>
+
+                {/* Calculation Summary */}
+                <div className="p-3 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 space-y-1 text-xs">
+                  <div className="flex justify-between text-gray-600">
+                    <span>{t.subtotal}:</span>
+                    <span className="font-mono font-bold">{posSubtotal} EGP</span>
+                  </div>
+                  {posDeliveryFee > 0 && (
+                    <div className="flex justify-between text-gray-600">
+                      <span>{t.deliveryFee}:</span>
+                      <span className="font-mono font-bold">{posDeliveryFee} EGP</span>
+                    </div>
+                  )}
+                  {posDiscount > 0 && (
+                    <div className="flex justify-between text-emerald-700">
+                      <span>{t.discountTotal}:</span>
+                      <span className="font-mono font-bold">-{posDiscount} EGP</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-1 border-t border-[#D4AF37]/20 font-black text-sm text-[#2B140E]">
+                    <span>{t.total}:</span>
+                    <span className="text-[#8C6212] font-mono">{posTotal} EGP</span>
+                  </div>
+                </div>
+
+                {/* Submit Order Button */}
+                <button
+                  type="submit"
+                  disabled={posCart.length === 0}
+                  className="w-full py-3 rounded-2xl text-xs font-black transition-all shadow-md active:scale-98 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-[#1A0A06]"
+                  style={{
+                    background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
+                  }}
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>{language === 'ar' ? 'تأكيد الطلب وطباعة الإيصال' : 'Confirm Order & Print Receipt'}</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: SHIFT ORDERS LIST */}
         {activeTab === 'orders' && (
           <div className="space-y-3">
             {dailyOrders.length === 0 ? (
@@ -311,8 +1020,8 @@ export const CashierDashboard: React.FC = () => {
                 </h3>
                 <p className="text-xs text-gray-500">
                   {language === 'ar'
-                    ? 'ستظهر هنا طلبات العملاء اللحظية والتوصيل بمجرد إرسالها.'
-                    : 'Customer web orders and in-store orders will populate here live.'}
+                    ? 'ستظهر هنا طلبات العملاء اللحظية ونظام الكاشير بمجرد إرسالها.'
+                    : 'Customer web orders and POS orders will populate here live.'}
                 </p>
               </div>
             ) : (
@@ -322,7 +1031,7 @@ export const CashierDashboard: React.FC = () => {
                   return (
                     <div
                       key={order.id}
-                      className="p-4 rounded-2xl bg-white border border-[#D4AF37]/25 shadow-sm space-y-3 flex flex-col justify-between"
+                      className="p-4 rounded-2xl bg-white border border-[#D4AF37]/25 shadow-xs space-y-3 flex flex-col justify-between"
                     >
                       {/* Order Header */}
                       <div className="flex items-start justify-between">
@@ -396,6 +1105,11 @@ export const CashierDashboard: React.FC = () => {
                             {order.delivery_address}
                           </p>
                         )}
+                        {order.notes && (
+                          <p className="text-[10px] text-gray-500 italic">
+                            {order.notes}
+                          </p>
+                        )}
                       </div>
 
                       {/* Order Items Preview */}
@@ -416,7 +1130,7 @@ export const CashierDashboard: React.FC = () => {
                           {isDigital ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
                               <CreditCard className="w-3 h-3" />
-                              <span>InstaPay ({order.transfer_from_phone})</span>
+                              <span>InstaPay ({order.transfer_from_phone || 'Verified'})</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
@@ -447,14 +1161,156 @@ export const CashierDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* 4. TAB 2: EXPENSES LOG */}
+        {/* TAB 3: PRODUCTS & STOCK LIST (STRICTLY READ-ONLY) */}
+        {activeTab === 'products' && (
+          <div className="space-y-4">
+            {/* Notice Banner */}
+            <div className="p-3.5 rounded-2xl bg-[#FFFBF5] border border-[#D4AF37]/40 flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-[#D4AF37]/20 text-[#8C6212]">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-[#2B140E]">
+                  {language === 'ar' ? 'قائمة الأصناف والمخزون المتاح (عرض فقط)' : 'Products Catalog & Available Stock (Read-Only)'}
+                </p>
+                <p className="text-[11px] text-gray-600">
+                  {language === 'ar'
+                    ? 'يمكن للكاشير الاطلاع على الأصناف والأسعار والمخزون الحالي. صلاحيات الإضافة والتعديل والحذف مقصورة حصرياً على المالك.'
+                    : 'Cashiers can view products, pricing, and live inventory. Adding, editing, and deleting items is restricted to the Owner.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Filter controls */}
+            <div className="p-3.5 rounded-2xl bg-white border border-[#D4AF37]/25 flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={prodSearch}
+                  onChange={(e) => setProdSearch(e.target.value)}
+                  placeholder={language === 'ar' ? 'بحث عن صنف...' : 'Search items...'}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/25 text-xs text-[#2B140E] focus:outline-hidden focus:border-[#D4AF37]"
+                />
+              </div>
+
+              <div className="flex gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                {categoriesList.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setProdCategory(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                      prodCategory === cat.id
+                        ? 'bg-[#2B140E] text-[#F7E7A9]'
+                        : 'bg-[#FFFBF5] text-[#2B140E] hover:bg-gray-100 border border-[#D4AF37]/20'
+                    }`}
+                  >
+                    {language === 'ar' ? cat.labelAr : cat.labelEn}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Read-Only Products Table/List */}
+            <div className="bg-white rounded-2xl border border-[#D4AF37]/25 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FFFBF5] text-gray-600 border-b border-[#D4AF37]/20">
+                    <tr>
+                      <th className="p-3 font-bold">{language === 'ar' ? 'الصنف' : 'Item'}</th>
+                      <th className="p-3 font-bold">{language === 'ar' ? 'القسم' : 'Category'}</th>
+                      <th className="p-3 font-bold">{language === 'ar' ? 'السعر' : 'Price'}</th>
+                      <th className="p-3 font-bold">{language === 'ar' ? 'المخزون الحالي' : 'Live Stock'}</th>
+                      <th className="p-3 font-bold">{language === 'ar' ? 'الحالة' : 'Status'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredStockProducts.map((p) => {
+                      const isOutOfStock = p.stock <= 0;
+                      const isLowStock = p.stock > 0 && p.stock <= 10;
+                      return (
+                        <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="p-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                                {p.image ? (
+                                  <img
+                                    src={p.image}
+                                    alt={p.name_en}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                    <Package className="w-4 h-4" />
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-bold text-[#2B140E]">{p.name_ar}</p>
+                                <p className="text-[11px] text-gray-500">{p.name_en}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3 capitalize text-gray-600">
+                            {p.category.replace('_', ' ')}
+                          </td>
+                          <td className="p-3 font-mono font-bold">
+                            {p.discount_price ? (
+                              <div>
+                                <span className="text-emerald-700">{p.discount_price} EGP</span>
+                                <span className="text-gray-400 line-through text-[10px] ml-1.5">
+                                  {p.price} EGP
+                                </span>
+                              </div>
+                            ) : (
+                              <span>{p.price} EGP</span>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-sm">
+                            {p.stock}
+                          </td>
+                          <td className="p-3">
+                            {isOutOfStock ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                                <AlertTriangle className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'غير متوفر' : 'Out of Stock'}</span>
+                              </span>
+                            ) : isLowStock ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                <AlertCircle className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'مخزون منخفض' : 'Low Stock'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                <Check className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'متوفر' : 'In Stock'}</span>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: SHIFT EXPENSES LOG */}
         {activeTab === 'expenses' && (
           <div className="bg-white rounded-2xl border border-[#D4AF37]/25 overflow-hidden shadow-xs">
             <div className="p-4 bg-[#FFFBF5] border-b border-[#D4AF37]/20 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[#2B140E]">
-                {t.externalExpenses}
-              </h3>
-              <span className="text-xs font-black text-rose-700">
+              <div>
+                <h3 className="text-sm font-bold text-[#2B140E]">
+                  {t.externalExpenses}
+                </h3>
+                <p className="text-[11px] text-gray-500">
+                  {language === 'ar' ? 'مصاريف ونثريات الوردية الحالية' : 'Expenses logged in current shift'}
+                </p>
+              </div>
+              <span className="text-xs font-black text-rose-700 font-mono">
                 Total: {totalShiftExpenses.toFixed(2)} {t.priceCurrency}
               </span>
             </div>
@@ -470,20 +1326,20 @@ export const CashierDashboard: React.FC = () => {
                     <div>
                       <h4 className="text-sm font-bold text-[#2B140E]">{exp.title}</h4>
                       <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                        <span className="capitalize px-2 py-0.5 rounded-md bg-gray-100 font-medium">
+                        <span className="capitalize px-2 py-0.5 rounded-md bg-gray-100 font-medium text-[10px]">
                           {exp.category.replace('_', ' ')}
                         </span>
                         <span>•</span>
-                        <span>{new Date(exp.created_at).toLocaleTimeString()}</span>
+                        <span className="text-[11px]">{new Date(exp.created_at).toLocaleTimeString()}</span>
                         {exp.notes && (
                           <>
                             <span>•</span>
-                            <span className="italic text-gray-400">{exp.notes}</span>
+                            <span className="italic text-gray-400 text-[11px]">{exp.notes}</span>
                           </>
                         )}
                       </div>
                     </div>
-                    <span className="text-sm font-black text-rose-700">
+                    <span className="text-sm font-black text-rose-700 font-mono">
                       -{exp.amount} {t.priceCurrency}
                     </span>
                   </div>
@@ -589,7 +1445,7 @@ export const CashierDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 2: STRICT END SHIFT RECONCILIATION PROMPT (Crucial Business Logic) */}
+      {/* MODAL 2: STRICT END SHIFT RECONCILIATION PROMPT */}
       {isShiftModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-5">
@@ -616,15 +1472,15 @@ export const CashierDashboard: React.FC = () => {
                 <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 space-y-1.5 text-xs">
                   <div className="flex justify-between">
                     <span>Shift Cash Orders Sales:</span>
-                    <span className="font-bold">{cashOrdersSales.toFixed(2)} EGP</span>
+                    <span className="font-bold font-mono">{cashOrdersSales.toFixed(2)} EGP</span>
                   </div>
                   <div className="flex justify-between text-rose-600">
                     <span>Minus Cash Expenses:</span>
-                    <span className="font-bold">-{totalShiftExpenses.toFixed(2)} EGP</span>
+                    <span className="font-bold font-mono">-{totalShiftExpenses.toFixed(2)} EGP</span>
                   </div>
                   <div className="flex justify-between pt-1 border-t font-black text-[#2B140E]">
                     <span>{t.systemExpected}:</span>
-                    <span className="text-[#8C6212]">{expectedPhysicalDrawerCash.toFixed(2)} EGP</span>
+                    <span className="text-[#8C6212] font-mono">{expectedPhysicalDrawerCash.toFixed(2)} EGP</span>
                   </div>
                   <p className="text-[10px] text-gray-400 italic">
                     * Note: InstaPay/Digital payments ({digitalOrdersSales.toFixed(2)} EGP) are received electronically and excluded from drawer cash.
@@ -703,22 +1559,26 @@ export const CashierDashboard: React.FC = () => {
                     <span className="font-mono font-bold">{shiftCompletedReport.shift_number}</span>
                   </div>
                   <div className="flex justify-between">
+                    <span>Cashier:</span>
+                    <span className="font-bold">{shiftCompletedReport.cashier_name}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span>System Expected Cash:</span>
-                    <span className="font-bold">{shiftCompletedReport.system_expected_cash} EGP</span>
+                    <span className="font-mono font-bold">{shiftCompletedReport.system_expected_cash} EGP</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Counted by Cashier:</span>
-                    <span className="font-bold">{shiftCompletedReport.cashier_reported_cash} EGP</span>
+                    <span className="font-mono font-bold">{shiftCompletedReport.cashier_reported_cash} EGP</span>
                   </div>
                   <div className="flex justify-between pt-1 border-t font-black">
                     <span>Variance / Discrepancy:</span>
                     <span
                       className={
                         shiftCompletedReport.discrepancy === 0
-                          ? 'text-green-700'
+                          ? 'text-green-700 font-mono'
                           : shiftCompletedReport.discrepancy > 0
-                          ? 'text-blue-700'
-                          : 'text-rose-700'
+                          ? 'text-blue-700 font-mono'
+                          : 'text-rose-700 font-mono'
                       }
                     >
                       {shiftCompletedReport.discrepancy >= 0
@@ -732,7 +1592,7 @@ export const CashierDashboard: React.FC = () => {
                   onClick={() => setIsShiftModalOpen(false)}
                   className="w-full py-3 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
                 >
-                  {language === 'ar' ? 'تم - بدء الوردية التالية' : 'Done - Ready for Next Shift'}
+                  {language === 'ar' ? 'تم - إغلاق وتحديث الوردية' : 'Done - Ready for Next Shift'}
                 </button>
               </div>
             )}
