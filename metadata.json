@@ -1,6 +1,0 @@
-{
-  "name": "Chocolate House - شوكلت هاوس",
-  "description": "Bilingual mobile-first cafe e-commerce platform and POS system with customer ordering, stock validation, and role-protected Owner and Cashier dashboards.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
