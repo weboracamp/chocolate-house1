@@ -948,7 +948,7 @@ export const CashierDashboard: React.FC = () => {
                       type="text"
                       value={posTransferPhone}
                       onChange={(e) => setPosTransferPhone(e.target.value)}
-                      placeholder="01112437437"
+                      placeholder="01113116242"
                       className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 text-xs font-mono focus:border-[#D4AF37] focus:outline-hidden"
                     />
                   </div>

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 export const ContactUsPage: React.FC = () => {
-  const { language, t, siteConfig, faqs, submitContactInquiry } = useStore();
+  const { language, t, siteConfig, faqs, submitContactMessage } = useStore();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -30,15 +30,15 @@ export const ContactUsPage: React.FC = () => {
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.phone.trim() || !formData.message.trim()) {
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      submitContactInquiry({
+    try {
+      const ok = await submitContactMessage({
         name: formData.name,
         phone: formData.phone,
         email: formData.email,
@@ -46,16 +46,19 @@ export const ContactUsPage: React.FC = () => {
         message: formData.message,
       });
 
+      if (ok) {
+        setSubmittedSuccess(true);
+        setFormData({
+          name: '',
+          phone: '',
+          email: '',
+          subject: '',
+          message: '',
+        });
+      }
+    } finally {
       setIsSubmitting(false);
-      setSubmittedSuccess(true);
-      setFormData({
-        name: '',
-        phone: '',
-        email: '',
-        subject: '',
-        message: '',
-      });
-    }, 600);
+    }
   };
 
   const toggleFaq = (idx: number) => {
@@ -253,7 +256,7 @@ export const ContactUsPage: React.FC = () => {
                         required
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder="01112437437"
+                        placeholder="01113116242"
                         className="w-full px-4 py-3 rounded-xl border border-[#D4AF37]/30 text-xs sm:text-sm bg-[#FFFBF5] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"
                       />
                     </div>

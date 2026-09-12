@@ -56,6 +56,7 @@ export const OwnerDashboard: React.FC = () => {
     showToast,
     contactMessages,
     deleteContactMessage,
+    updateContactMessageStatus,
     newsletterSubscribers,
     deleteNewsletterSubscriber,
   } = useStore();
@@ -891,6 +892,7 @@ export const OwnerDashboard: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-[#FFFBF5] text-[#2B140E] border-b border-[#D4AF37]/20 font-bold uppercase text-[10px]">
                       <tr>
+                        <th className="p-3.5">{language === 'ar' ? 'الحالة' : 'Status'}</th>
                         <th className="p-3.5">{t.senderName}</th>
                         <th className="p-3.5">{t.senderPhone}</th>
                         <th className="p-3.5">{t.senderEmail}</th>
@@ -914,6 +916,21 @@ export const OwnerDashboard: React.FC = () => {
                         })
                         .map((msg) => (
                           <tr key={msg.id} className="hover:bg-amber-50/40 transition-colors">
+                            <td className="p-3.5 whitespace-nowrap">
+                              {msg.status === 'resolved' ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  {language === 'ar' ? 'تم الرد' : 'Resolved'}
+                                </span>
+                              ) : msg.status === 'read' ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  {language === 'ar' ? 'تمت القراءة' : 'Read'}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                  {language === 'ar' ? 'جديد' : 'New'}
+                                </span>
+                              )}
+                            </td>
                             <td className="p-3.5 font-bold text-[#2B140E] whitespace-nowrap">
                               {msg.name}
                             </td>
@@ -964,7 +981,12 @@ export const OwnerDashboard: React.FC = () => {
                             <td className="p-3.5 text-right rtl:text-left whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
-                                  onClick={() => setSelectedMessage(msg)}
+                                  onClick={() => {
+                                    setSelectedMessage(msg);
+                                    if (msg.status === 'new' && updateContactMessageStatus) {
+                                      updateContactMessageStatus(msg.id, 'read');
+                                    }
+                                  }}
                                   className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
                                 >
                                   {language === 'ar' ? 'عرض' : 'View'}
@@ -1158,7 +1180,7 @@ export const OwnerDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 flex items-center justify-between">
+            <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
               <div className="flex items-center gap-2">
                 <a
                   href={`tel:${selectedMessage.phone}`}
@@ -1176,6 +1198,32 @@ export const OwnerDashboard: React.FC = () => {
                   <MessageSquare className="w-3 h-3" />
                   <span>WhatsApp</span>
                 </a>
+                <button
+                  onClick={() => {
+                    const nextStatus = selectedMessage.status === 'resolved' ? 'read' : 'resolved';
+                    updateContactMessageStatus(selectedMessage.id, nextStatus);
+                    setSelectedMessage({ ...selectedMessage, status: nextStatus });
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                    selectedMessage.status === 'resolved'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                      : 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700'
+                  }`}
+                >
+                  {selectedMessage.status === 'resolved'
+                    ? (language === 'ar' ? 'تحديد كـ قيد المتابعة' : 'Mark as Pending')
+                    : (language === 'ar' ? 'تحديد كـ تم الرد' : 'Mark as Replied')}
+                </button>
+                <button
+                  onClick={() => {
+                    deleteContactMessage(selectedMessage.id);
+                    setSelectedMessage(null);
+                  }}
+                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200"
+                  title={t.deleteRecord}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
 
               <button

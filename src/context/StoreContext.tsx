@@ -60,12 +60,13 @@ interface StoreContextType {
   contactInquiries: ContactInquiry[];
   submitContactInquiry: (inquiry: Omit<ContactInquiry, 'id' | 'created_at' | 'status'>) => boolean;
   submitContactMessage: (message: Omit<ContactMessage, 'id' | 'created_at'>) => Promise<boolean>;
-  deleteContactMessage: (id: string) => void;
+  deleteContactMessage: (id: string) => Promise<boolean>;
+  updateContactMessageStatus: (id: string, status: 'new' | 'read' | 'resolved') => Promise<boolean>;
 
   // Newsletter Subscribers
   newsletterSubscribers: NewsletterSubscriber[];
   subscribeNewsletter: (email: string) => Promise<boolean>;
-  deleteNewsletterSubscriber: (id: string) => void;
+  deleteNewsletterSubscriber: (id: string) => Promise<boolean>;
   
   // Products
   products: Product[];
@@ -217,6 +218,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   
   // Contact Messages & Inquiries State
   const [contactMessages, setContactMessages] = useState<ContactMessage[]>(() => {
+    // When Supabase is configured, start empty so real DB data (even 0 rows) is faithfully reflected
+    if (supabase) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CONTACT_MESSAGES);
       if (saved) return JSON.parse(saved);
@@ -249,6 +252,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Newsletter Subscribers State
   const [newsletterSubscribers, setNewsletterSubscribers] = useState<NewsletterSubscriber[]>(() => {
+    // When Supabase is configured, start empty so real DB data (even 0 rows) is faithfully reflected
+    if (supabase) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.NEWSLETTER_SUBSCRIBERS);
       if (saved) return JSON.parse(saved);
@@ -317,11 +322,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             { table: 'contact_messages' }
           );
 
-          if (!msgError && messages && messages.length > 0) {
+          if (!msgError && Array.isArray(messages)) {
             setContactMessages(messages);
             if (msgFromCache) {
-              console.info('[StoreContext] ⚡ Loaded contact_messages from client-side cache');
+              console.info(`[StoreContext] ⚡ Loaded ${messages.length} contact_messages from client-side cache`);
+            } else {
+              console.info(`[StoreContext] 📨 Loaded ${messages.length} contact_messages from Supabase (empty table reflects as 0 rows)`);
             }
+          } else if (msgError) {
+            console.warn('[StoreContext] Failed fetching contact_messages from Supabase:', msgError);
           }
         } catch (err) {
           console.warn('Error loading contact_messages via cache:', err);
@@ -341,11 +350,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             { table: 'newsletter_subscribers' }
           );
 
-          if (!subError && subs && subs.length > 0) {
+          if (!subError && Array.isArray(subs)) {
             setNewsletterSubscribers(subs);
             if (subsFromCache) {
-              console.info('[StoreContext] ⚡ Loaded newsletter_subscribers from client-side cache');
+              console.info(`[StoreContext] ⚡ Loaded ${subs.length} newsletter_subscribers from client-side cache`);
+            } else {
+              console.info(`[StoreContext] 📬 Loaded ${subs.length} newsletter_subscribers from Supabase (empty table reflects as 0 rows)`);
             }
+          } else if (subError) {
+            console.warn('[StoreContext] Failed fetching newsletter_subscribers from Supabase:', subError);
           }
         } catch (err) {
           console.warn('Error loading newsletter_subscribers via cache:', err);
@@ -482,31 +495,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [newsletterSubscribers]);
 
   const submitContactMessage = async (messageData: Omit<ContactMessage, 'id' | 'created_at'>): Promise<boolean> => {
+    const newId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
     const newMessage: ContactMessage = {
       ...messageData,
-      id: `msg-${Date.now()}`,
-      created_at: new Date().toISOString(),
+      id: newId,
+      created_at: now,
       status: messageData.status || 'new',
     };
 
-    setContactMessages((prev) => [newMessage, ...prev]);
-
-    // Push to Supabase via mutation cache layer (automatically invalidates 'contact_messages' cache)
     if (supabase) {
       try {
-        await cachedSupabaseMutations.insert('contact_messages', {
-          name: messageData.name,
-          phone: messageData.phone,
-          email: messageData.email || null,
-          subject: messageData.subject || null,
-          message: messageData.message,
-          status: 'new',
-        });
-      } catch (err) {
-        console.warn('Could not insert to Supabase contact_messages:', err);
+        const { data, error } = await supabase
+          .from('contact_messages')
+          .insert({
+            id: newId,
+            name: messageData.name.trim(),
+            phone: messageData.phone.trim(),
+            email: messageData.email?.trim() || null,
+            subject: messageData.subject?.trim() || null,
+            message: messageData.message.trim(),
+            status: 'new',
+            created_at: now,
+          })
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.error('[StoreContext] Supabase insert contact_messages error:', error);
+          showToast(
+            language === 'ar' ? `فشل إرسال الرسالة: ${error.message}` : `Failed to send message: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+
+        invalidateCache('contact_messages');
+        if (data) {
+          newMessage.id = data.id;
+        }
+      } catch (err: any) {
+        console.error('[StoreContext] Exception inserting contact_message:', err);
+        showToast(language === 'ar' ? 'فشل إرسال الرسالة، يرجى المحاولة مرة أخرى' : 'Failed to send message, please try again', 'error');
+        return false;
       }
     }
 
+    setContactMessages((prev) => [newMessage, ...prev]);
     showToast(
       language === 'ar'
         ? 'شكراً لتواصلك معنا! تم استلام رسالتك وسنقوم بالرد عليك في أقرب وقت.'
@@ -516,59 +551,133 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
-  const deleteContactMessage = async (id: string) => {
-    setContactMessages((prev) => prev.filter((m) => m.id !== id));
+  const deleteContactMessage = async (id: string): Promise<boolean> => {
     if (supabase) {
       try {
-        // Automatically deletes and invalidates 'contact_messages' cache
-        await cachedSupabaseMutations.delete('contact_messages', id);
-      } catch (err) {
-        console.warn('Could not delete from Supabase contact_messages:', err);
+        const { error } = await supabase.from('contact_messages').delete().eq('id', id);
+        if (error) {
+          console.error('[StoreContext] Supabase delete contact_messages error:', error);
+          showToast(
+            language === 'ar' ? `فشل حذف الرسالة: ${error.message}` : `Failed to delete message: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+        invalidateCache('contact_messages');
+      } catch (err: any) {
+        console.error('[StoreContext] Exception deleting contact_message:', err);
+        showToast(language === 'ar' ? 'فشل حذف الرسالة' : 'Failed to delete message', 'error');
+        return false;
       }
     }
-    showToast(language === 'ar' ? 'تم حذف الرسالة' : 'Message deleted', 'info');
+
+    setContactMessages((prev) => prev.filter((m) => m.id !== id));
+    showToast(language === 'ar' ? 'تم حذف الرسالة بنجاح' : 'Message deleted successfully', 'info');
+    return true;
+  };
+
+  const updateContactMessageStatus = async (id: string, status: 'new' | 'read' | 'resolved'): Promise<boolean> => {
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('contact_messages')
+          .update({ status })
+          .eq('id', id);
+
+        if (error) {
+          console.error('[StoreContext] Supabase update contact_message status error:', error);
+          return false;
+        }
+        invalidateCache('contact_messages');
+      } catch (err) {
+        console.error('[StoreContext] Exception updating contact_message status:', err);
+        return false;
+      }
+    }
+
+    setContactMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status } : m)));
+    return true;
   };
 
   const subscribeNewsletter = async (email: string): Promise<boolean> => {
     const trimmed = email.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes('@')) {
-      showToast(language === 'ar' ? 'يرجى إدخال بريد إلكتروني صالح' : 'Please enter a valid email', 'error');
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!trimmed || !emailRegex.test(trimmed)) {
+      showToast(language === 'ar' ? 'يرجى إدخال بريد إلكتروني صالح' : 'Please enter a valid email address', 'error');
       return false;
     }
 
-    // Check if already subscribed
+    // Check if already subscribed locally
     const existing = newsletterSubscribers.find((s) => s.email.toLowerCase() === trimmed);
     if (existing) {
       showToast(
         language === 'ar'
-          ? 'هذا البريد الإلكتروني مسجل لدينا بالفعل!'
-          : 'This email is already subscribed!',
+          ? 'هذا البريد الإلكتروني مشترك بالفعل في نشرتنا البريدية!'
+          : 'This email is already subscribed to our newsletter!',
         'info'
       );
       return true;
     }
 
+    const newId = `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
     const newSubscriber: NewsletterSubscriber = {
-      id: `sub-${Date.now()}`,
+      id: newId,
       email: trimmed,
       is_active: true,
-      created_at: new Date().toISOString(),
+      created_at: now,
     };
 
-    setNewsletterSubscribers((prev) => [newSubscriber, ...prev]);
-
-    // Push to Supabase via mutation cache layer (automatically invalidates 'newsletter_subscribers' cache)
     if (supabase) {
       try {
-        await cachedSupabaseMutations.insert('newsletter_subscribers', {
-          email: trimmed,
-          is_active: true,
-        });
-      } catch (err) {
-        console.warn('Could not insert to Supabase newsletter_subscribers:', err);
+        const { data, error } = await supabase
+          .from('newsletter_subscribers')
+          .insert({
+            id: newId,
+            email: trimmed,
+            is_active: true,
+            created_at: now,
+          })
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          // Handle unique constraint conflict (PostgreSQL error code 23505 or duplicate message)
+          const isDuplicate =
+            error.code === '23505' ||
+            error.message?.toLowerCase().includes('duplicate') ||
+            error.message?.toLowerCase().includes('unique');
+
+          if (isDuplicate) {
+            showToast(
+              language === 'ar'
+                ? 'هذا البريد الإلكتروني مشترك بالفعل في نشرتنا البريدية!'
+                : 'This email is already subscribed to our newsletter!',
+              'info'
+            );
+            return true;
+          }
+
+          console.error('[StoreContext] Supabase insert newsletter_subscribers error:', error);
+          showToast(
+            language === 'ar' ? `فشل الاشتراك: ${error.message}` : `Subscription failed: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+
+        invalidateCache('newsletter_subscribers');
+        if (data) {
+          newSubscriber.id = data.id;
+        }
+      } catch (err: any) {
+        console.error('[StoreContext] Exception subscribing to newsletter:', err);
+        showToast(language === 'ar' ? 'فشل الاشتراك، يرجى المحاولة مرة أخرى' : 'Failed to subscribe, please try again', 'error');
+        return false;
       }
     }
 
+    setNewsletterSubscribers((prev) => [newSubscriber, ...prev]);
     showToast(
       language === 'ar'
         ? 'تم اشتراكك في النشرة البريدية بنجاح! ستصلك أحدث العروض والخصومات.'
@@ -578,17 +687,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
-  const deleteNewsletterSubscriber = async (id: string) => {
-    setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== id));
+  const deleteNewsletterSubscriber = async (id: string): Promise<boolean> => {
     if (supabase) {
       try {
-        // Automatically deletes and invalidates 'newsletter_subscribers' cache
-        await cachedSupabaseMutations.delete('newsletter_subscribers', id);
-      } catch (err) {
-        console.warn('Could not delete from Supabase newsletter_subscribers:', err);
+        const { error } = await supabase.from('newsletter_subscribers').delete().eq('id', id);
+        if (error) {
+          console.error('[StoreContext] Supabase delete newsletter_subscribers error:', error);
+          showToast(
+            language === 'ar' ? `فشل حذف المشترك: ${error.message}` : `Failed to delete subscriber: ${error.message}`,
+            'error'
+          );
+          return false;
+        }
+        invalidateCache('newsletter_subscribers');
+      } catch (err: any) {
+        console.error('[StoreContext] Exception deleting newsletter subscriber:', err);
+        showToast(language === 'ar' ? 'فشل حذف المشترك' : 'Failed to delete subscriber', 'error');
+        return false;
       }
     }
-    showToast(language === 'ar' ? 'تم حذف المشترك' : 'Subscriber deleted', 'info');
+
+    setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== id));
+    showToast(language === 'ar' ? 'تم حذف المشترك بنجاح' : 'Subscriber deleted successfully', 'info');
+    return true;
   };
 
   // Backward compatibility alias for contactInquiries
@@ -1586,6 +1707,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         submitContactInquiry,
         submitContactMessage,
         deleteContactMessage,
+        updateContactMessageStatus,
         newsletterSubscribers,
         subscribeNewsletter,
         deleteNewsletterSubscriber,

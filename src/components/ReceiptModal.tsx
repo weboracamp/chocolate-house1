@@ -69,7 +69,7 @@ export const ReceiptModal: React.FC = () => {
               Salah Salem ST, Al Hawamdeya Giza
             </p>
             <p className="text-[10px] text-gray-700">
-              Tel: 01112437437 | InstaPay: 01112437437
+              Tel: 01113116242 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
             </p>
             <div className="pt-2 text-xs font-bold">
               <span>{t.orderNumber}: </span>
