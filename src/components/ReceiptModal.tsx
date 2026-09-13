@@ -23,9 +23,9 @@ export const ReceiptModal: React.FC = () => {
     /* Outer Modal Container: Configured with id="thermal-receipt-modal" and print styles to prevent blank pages during window.print() */
     <div
       id="thermal-receipt-modal"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block print:w-[80mm] print:max-w-[80mm] print:h-auto print:min-h-0 print:mx-auto"
     >
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible">
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible print:h-auto print:min-h-0 print:mx-auto">
         {/* Top bar (Hidden when printing via .print:hidden) */}
         <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export const ReceiptModal: React.FC = () => {
         {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
         <div
           id="thermal-receipt-content"
-          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2 print:space-y-3"
+          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2.5 print:space-y-3 print:w-[80mm] print:max-w-[80mm] print:mx-auto print:h-auto print:min-h-0"
         >
           {/* Receipt Header */}
           <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">
@@ -69,7 +69,7 @@ export const ReceiptModal: React.FC = () => {
               Salah Salem ST, Al Hawamdeya Giza
             </p>
             <p className="text-[10px] text-gray-700">
-              Tel: 01113116242 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
+              Tel: 01112437437 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
             </p>
             <div className="pt-2 text-xs font-bold">
               <span>{t.orderNumber}: </span>

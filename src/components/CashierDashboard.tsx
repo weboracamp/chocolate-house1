@@ -106,6 +106,7 @@ export const CashierDashboard: React.FC = () => {
   const [physicalCashInput, setPhysicalCashInput] = useState('');
   const [shiftNotes, setShiftNotes] = useState('');
   const [shiftCompletedReport, setShiftCompletedReport] = useState<any>(null);
+  const [isEndingShift, setIsEndingShift] = useState(false);
 
   // Financial Calculations for the Shift
   const validDailyOrders = dailyOrders.filter((o) => o.status !== 'cancelled');
@@ -318,18 +319,24 @@ export const CashierDashboard: React.FC = () => {
     setIsExpenseModalOpen(false);
   };
 
-  const handleEndShiftSubmit = (e: React.FormEvent) => {
+  const handleEndShiftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const physicalAmount = parseFloat(physicalCashInput);
     if (isNaN(physicalAmount) || physicalAmount < 0) return;
 
-    const report = endShiftAndReconcile(
-      physicalAmount,
-      currentUser?.name || 'Cashier',
-      shiftNotes.trim() || undefined
-    );
-
-    setShiftCompletedReport(report);
+    setIsEndingShift(true);
+    try {
+      const report = await endShiftAndReconcile(
+        physicalAmount,
+        currentUser?.name || 'Cashier',
+        shiftNotes.trim() || undefined
+      );
+      setShiftCompletedReport(report);
+    } catch (err) {
+      console.error('Failed to end shift:', err);
+    } finally {
+      setIsEndingShift(false);
+    }
   };
 
   const categoriesList = [
@@ -1534,12 +1541,22 @@ export const CashierDashboard: React.FC = () => {
                   <button
                     type="submit"
                     id="submit-end-shift-btn"
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95"
+                    disabled={isEndingShift}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 ${
+                      isEndingShift ? 'opacity-60 cursor-not-allowed' : ''
+                    }`}
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    {t.confirmResetShift}
+                    {isEndingShift ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>{language === 'ar' ? 'جارٍ الأرشفة والإغلاق...' : 'Archiving & Closing...'}</span>
+                      </>
+                    ) : (
+                      t.confirmResetShift
+                    )}
                   </button>
                 </div>
               </form>
@@ -1589,7 +1606,12 @@ export const CashierDashboard: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => setIsShiftModalOpen(false)}
+                  onClick={() => {
+                    setIsShiftModalOpen(false);
+                    setShiftCompletedReport(null);
+                    setPhysicalCashInput('');
+                    setShiftNotes('');
+                  }}
                   className="w-full py-3 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
                 >
                   {language === 'ar' ? 'تم - إغلاق وتحديث الوردية' : 'Done - Ready for Next Shift'}

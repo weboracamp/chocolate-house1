@@ -256,7 +256,7 @@ export const ContactUsPage: React.FC = () => {
                         required
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder="01113116242"
+                        placeholder="01112437437"
                         className="w-full px-4 py-3 rounded-xl border border-[#D4AF37]/30 text-xs sm:text-sm bg-[#FFFBF5] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"
                       />
                     </div>

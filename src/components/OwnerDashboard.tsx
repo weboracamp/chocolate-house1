@@ -90,6 +90,7 @@ export const OwnerDashboard: React.FC = () => {
   // Export Modal Confirmation
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportedSummary, setExportedSummary] = useState<any>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const [copiedEmails, setCopiedEmails] = useState(false);
 
   // Selected message for detail view
@@ -128,6 +129,16 @@ export const OwnerDashboard: React.FC = () => {
       order.customer_phone.includes(q)
     );
   });
+
+  // Current Month orders specifically for export and reset calculations
+  const currentMonthOrders = orders.filter((o) => {
+    const d = new Date(o.created_at);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const currentMonthRevenue = currentMonthOrders.reduce(
+    (sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0),
+    0
+  );
 
   // Financial Calculations
   const nonCancelledOrders = filteredOrders.filter((o) => o.status !== 'cancelled');
@@ -240,9 +251,16 @@ export const OwnerDashboard: React.FC = () => {
     }
   };
 
-  const handleExecuteExportAndReset = () => {
-    const result = exportAndResetMonthlyData();
-    setExportedSummary(result);
+  const handleExecuteExportAndReset = async () => {
+    setIsExporting(true);
+    try {
+      const result = await exportAndResetMonthlyData();
+      setExportedSummary(result);
+    } catch (err) {
+      console.error('Export and reset error:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -1447,32 +1465,49 @@ export const OwnerDashboard: React.FC = () => {
                   {t.exportConfirmDesc}
                 </p>
 
-                <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 text-xs space-y-1">
+                <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 text-xs space-y-1.5">
                   <div className="flex justify-between">
-                    <span>Active Orders Count:</span>
-                    <span className="font-bold">{orders.filter((o) => !o.is_archived).length}</span>
+                    <span>Current Month Total Orders:</span>
+                    <span className="font-bold">{currentMonthOrders.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Total Active Revenue:</span>
-                    <span className="font-bold">{totalRevenue.toFixed(2)} EGP</span>
+                    <span>Current Month Gross Revenue:</span>
+                    <span className="font-bold">{currentMonthRevenue.toFixed(2)} EGP</span>
                   </div>
+                  <p className="text-[11px] text-amber-900 bg-amber-50 p-2.5 rounded-lg border border-amber-200 mt-1 leading-relaxed">
+                    {language === 'ar'
+                      ? 'سيتم توليد ملف إكسيل (.xlsx) بثلاث صفحات (الطلبات، تفاصيل الأصناف، تقارير الورديات) وبدء التنزيل فوراً. وفقط بعد بدء التنزيل، سيتم حذف طلبات هذا الشهر نهائياً من قاعدة البيانات.'
+                      : 'Generates a multi-sheet Excel (.xlsx) file (Orders, Order Items, Shifts Audit) and triggers download. Only after download begins, orders for this month will be permanently deleted from the database.'}
+                  </p>
                 </div>
 
                 <div className="pt-2 flex items-center justify-end gap-2">
                   <button
                     onClick={() => setIsExportModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100"
+                    disabled={isExporting}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100 disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
+                    id="owner-confirm-export-reset-btn"
                     onClick={handleExecuteExportAndReset}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95"
+                    disabled={isExporting}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                      isExporting ? 'opacity-60 cursor-not-allowed' : ''
+                    }`}
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    Download Excel/CSV & Archive
+                    {isExporting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{language === 'ar' ? 'جارٍ التصدير والحذف...' : 'Generating & Resetting...'}</span>
+                      </>
+                    ) : (
+                      language === 'ar' ? 'تنزيل إكسيل (.xlsx) وإعادة التعيين' : 'Download Excel (.xlsx) & Reset Month'
+                    )}
                   </button>
                 </div>
               </div>
@@ -1482,15 +1517,15 @@ export const OwnerDashboard: React.FC = () => {
                   <Sparkles className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-[#2B140E]">
-                  Export Complete & Data Archived!
+                  {language === 'ar' ? 'تم تنزيل الإكسيل وحذف بيانات الشهر بنجاح!' : 'Export Complete & Month Reset!'}
                 </h3>
                 <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 text-xs space-y-1.5 text-left">
                   <div className="flex justify-between">
-                    <span>Exported Orders:</span>
+                    <span>Exported & Deleted Orders:</span>
                     <span className="font-bold">{exportedSummary.totalOrders}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Exported Revenue:</span>
+                    <span>Exported Sales:</span>
                     <span className="font-bold">{exportedSummary.totalSales.toFixed(2)} EGP</span>
                   </div>
                   <div className="flex justify-between font-bold pt-1 border-t text-[#8C6212]">
@@ -1501,7 +1536,10 @@ export const OwnerDashboard: React.FC = () => {
                   </div>
                 </div>
                 <button
-                  onClick={() => setIsExportModalOpen(false)}
+                  onClick={() => {
+                    setIsExportModalOpen(false);
+                    setExportedSummary(null);
+                  }}
                   className="w-full py-3 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06]"
                 >
                   {t.close}

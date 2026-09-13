@@ -33,6 +33,7 @@ import {
 } from '../lib/supabaseCache';
 import { playNewOrderSound, isSoundEnabled, setSoundEnabled } from '../lib/soundAlert';
 import confetti from 'canvas-confetti';
+import * as XLSX from 'xlsx';
 
 interface Toast {
   id: string;
@@ -103,10 +104,10 @@ interface StoreContextType {
   // Shifts
   shiftReports: ShiftReport[];
   currentShiftId: string;
-  endShiftAndReconcile: (cashierReportedCash: number, cashierName: string, notes?: string) => ShiftReport;
+  endShiftAndReconcile: (cashierReportedCash: number, cashierName: string, notes?: string) => Promise<ShiftReport>;
   
   // Monthly Export & Reset (Owner)
-  exportAndResetMonthlyData: () => { bestSeller: Product | null; totalOrders: number; totalSales: number };
+  exportAndResetMonthlyData: () => Promise<{ bestSeller: Product | null; totalOrders: number; totalSales: number }>;
   
   // Auth
   currentUser: UserProfile | null;
@@ -425,12 +426,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             { table: 'orders' }
           );
 
-          if (!ordError && remoteOrders && remoteOrders.length > 0) {
+          if (!ordError && Array.isArray(remoteOrders)) {
             setOrders((prevLocal) => {
-              // Merge remote and local orders gracefully without duplicating
-              const existingIds = new Set(prevLocal.map((o) => o.id));
-              const newFromRemote = remoteOrders.filter((ro) => !existingIds.has(ro.id));
-              return [...prevLocal, ...newFromRemote];
+              const remoteMap = new Map(remoteOrders.map((ro) => [ro.id, ro]));
+              if (!ordersFromCache) {
+                // When fresh from Supabase, Supabase is source of truth for synced orders
+                const unsyncedLocal = prevLocal.filter((lo) => lo.id.startsWith('ord-local-') && !remoteMap.has(lo.id));
+                return [...remoteOrders, ...unsyncedLocal];
+              }
+              const updated = prevLocal.map((lo) => remoteMap.get(lo.id) || lo);
+              const localIds = new Set(prevLocal.map((lo) => lo.id));
+              const missingFromLocal = remoteOrders.filter((ro) => !localIds.has(ro.id));
+              return [...missingFromLocal, ...updated];
             });
             if (ordersFromCache) {
               console.info('[StoreContext] ⚡ Loaded orders from client-side cache');
@@ -1021,10 +1028,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return localStorage.getItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP) || new Date(0).toISOString();
   });
 
-  // Daily orders (active non-archived orders since last shift reset)
+  // Daily orders (active non-archived orders created within today's calendar date)
   const dailyOrders = orders.filter((o) => {
     if (o.is_archived) return false;
-    return new Date(o.created_at) >= new Date(lastShiftReset);
+    const orderDate = new Date(o.created_at);
+    const now = new Date();
+    const isToday =
+      orderDate.getFullYear() === now.getFullYear() &&
+      orderDate.getMonth() === now.getMonth() &&
+      orderDate.getDate() === now.getDate();
+    return isToday;
   });
 
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<Order | null>(null);
@@ -1253,20 +1266,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const currentShiftId = `shift-${new Date().toISOString().slice(0, 10)}`;
 
-  const endShiftAndReconcile = (
+  const endShiftAndReconcile = async (
     cashierReportedCash: number,
     cashierName: string,
     notes?: string
-  ): ShiftReport => {
-    // Calculate shift financial totals
-    const shiftOrders = dailyOrders.filter((o) => o.status !== 'cancelled');
-    const totalSales = shiftOrders.reduce((sum, o) => sum + o.total, 0);
+  ): Promise<ShiftReport> => {
+    const now = new Date();
+    // Local start of today (midnight) to end of today (23:59:59.999)
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const startOfTodayIso = startOfToday.toISOString();
+    const endOfTodayIso = endOfToday.toISOString();
 
-    const cashSales = shiftOrders
+    // 1. Find all orders where created_at falls within TODAY'S calendar date (from local midnight to midnight)
+    const todayOrders = orders.filter((o) => {
+      const d = new Date(o.created_at);
+      return d >= startOfToday && d <= endOfToday;
+    });
+    const todayOrderIds = todayOrders.map((o) => o.id);
+
+    // 2. Shift orders: currently non-cancelled orders of today (preferring active ones)
+    const shiftOrders = todayOrders.filter((o) => o.status !== 'cancelled' && !o.is_archived);
+    const effectiveShiftOrders = shiftOrders.length > 0 ? shiftOrders : todayOrders.filter((o) => o.status !== 'cancelled');
+
+    const totalSales = effectiveShiftOrders.reduce((sum, o) => sum + o.total, 0);
+    const cashSales = effectiveShiftOrders
       .filter((o) => o.payment_method === 'cod')
       .reduce((sum, o) => sum + o.total, 0);
-
-    const digitalSales = shiftOrders
+    const digitalSales = effectiveShiftOrders
       .filter((o) => o.payment_method === 'instapay_wallet')
       .reduce((sum, o) => sum + o.total, 0);
 
@@ -1280,9 +1307,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `rep-${Date.now()}`,
       shift_number: `SHIFT-${new Date().toISOString().slice(5, 10).replace('-', '')}-${Math.floor(100 + Math.random() * 900)}`,
       cashier_name: cashierName,
-      start_time: lastShiftReset,
+      start_time: startOfToday.toISOString(),
       end_time: new Date().toISOString(),
-      total_orders_count: shiftOrders.length,
+      total_orders_count: effectiveShiftOrders.length,
       total_sales: totalSales,
       cash_sales: cashSales,
       digital_sales: digitalSales,
@@ -1294,16 +1321,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       created_at: new Date().toISOString(),
     };
 
+    // Save shift report locally
     setShiftReports((prev) => [report, ...prev]);
     invalidateCache('shift_reports');
 
+    // Save shift report to Supabase (without requiring any dummy shift report or shift_id on orders)
     if (supabase) {
-      supabase
-        .from('shift_reports')
-        .insert({
+      try {
+        const isUuid = currentUser?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentUser.id);
+        const { error: repErr } = await supabase.from('shift_reports').insert({
           id: report.id,
           shift_number: report.shift_number,
-          cashier_id: currentUser?.id || null,
+          cashier_id: isUuid ? currentUser.id : null,
           cashier_name: report.cashier_name,
           start_time: report.start_time,
           end_time: report.end_time,
@@ -1317,41 +1346,170 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           discrepancy: report.discrepancy,
           notes: report.notes || null,
           created_at: report.created_at,
-        })
-        .then(({ error }) => {
-          if (error) {
-            console.error('[StoreContext] Failed to insert shift report into Supabase:', error);
-            showToast(
-              language === 'ar'
-                ? `تنبيه: تعذر حفظ تقرير الوردية بالسحابة: ${error.message}`
-                : `Warning: Could not sync shift report with database: ${error.message}`,
-              'warning'
-            );
-          }
         });
+        if (repErr) {
+          console.warn('[StoreContext] Could not insert shift report into Supabase:', repErr);
+        }
+      } catch (err) {
+        console.warn('[StoreContext] Exception inserting shift report into Supabase:', err);
+      }
     }
 
-    // Reset cashier daily view
+    // 3. UPDATE those orders in Supabase: SET is_archived = true (do NOT delete them from Supabase - they must remain in database)
+    if (supabase) {
+      try {
+        const { error: updateByDateErr } = await supabase
+          .from('orders')
+          .update({ is_archived: true })
+          .gte('created_at', startOfTodayIso)
+          .lte('created_at', endOfTodayIso);
+
+        if (updateByDateErr) {
+          console.warn('[StoreContext] Update orders is_archived by date error, falling back to IDs:', updateByDateErr);
+          if (todayOrderIds.length > 0) {
+            await supabase.from('orders').update({ is_archived: true }).in('id', todayOrderIds);
+          }
+        }
+      } catch (err) {
+        console.error('[StoreContext] Exception updating is_archived on Supabase:', err);
+      }
+    }
+
+    // 4. Update local orders state: set is_archived = true for all orders of today's date
+    setOrders((prev) =>
+      prev.map((o) => {
+        const d = new Date(o.created_at);
+        if (d >= startOfToday && d <= endOfToday) {
+          return { ...o, is_archived: true };
+        }
+        return o;
+      })
+    );
+    invalidateCache('orders');
+
+    // 5. Update last shift reset timestamp
     const nowIso = new Date().toISOString();
     setLastShiftReset(nowIso);
     localStorage.setItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP, nowIso);
 
     showToast(
       language === 'ar'
-        ? `تم إغلاق الوردية وحفظ التقرير. الفارق: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} ج.م`
-        : `Shift closed. Discrepancy: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} EGP`,
+        ? `تم إنهاء الوردية وأرشفة طلبات اليوم بنجاح. الفارق: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} ج.م`
+        : `Shift ended & today's orders archived. Discrepancy: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} EGP`,
       discrepancy === 0 ? 'success' : discrepancy > 0 ? 'info' : 'warning'
     );
 
     return report;
   };
 
-  // 8. Owner: Export & Reset Monthly Data
-  const exportAndResetMonthlyData = () => {
-    // Compute best seller
-    const productSalesMap: Record<string, { product: Product; count: number; revenue: number }> = {};
+  // 8. Owner: Export & Reset Monthly Data (Multi-Sheet .xlsx & Permanent Database Deletion)
+  const exportAndResetMonthlyData = async (): Promise<{
+    bestSeller: Product | null;
+    totalOrders: number;
+    totalSales: number;
+  }> => {
+    const now = new Date();
+    // 1. Current calendar month bounds (local midnight 1st of month to end of month 23:59:59.999)
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const startOfMonthIso = startOfMonth.toISOString();
+    const endOfMonthIso = endOfMonth.toISOString();
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    orders.forEach((order) => {
+    // 2. Query ALL orders from Supabase for current calendar month (both archived and active)
+    let monthOrders: Order[] = [];
+    let targetOrderIds: string[] = [];
+    let monthItems: any[] = [];
+
+    if (supabase) {
+      try {
+        const { data: dbOrders, error: ordErr } = await supabase
+          .from('orders')
+          .select('*')
+          .gte('created_at', startOfMonthIso)
+          .lte('created_at', endOfMonthIso)
+          .order('created_at', { ascending: false });
+
+        if (!ordErr && Array.isArray(dbOrders)) {
+          targetOrderIds = dbOrders.map((o) => o.id);
+          if (targetOrderIds.length > 0) {
+            const { data: dbItems } = await supabase
+              .from('order_items')
+              .select('*')
+              .in('order_id', targetOrderIds);
+            monthItems = dbItems || [];
+          }
+
+          monthOrders = dbOrders.map((ord: any) => {
+            const items = monthItems
+              .filter((item) => item.order_id === ord.id)
+              .map((item) => ({
+                product_id: item.product_id || '',
+                product_name_en: item.product_name_en,
+                product_name_ar: item.product_name_ar,
+                quantity: item.quantity,
+                unit_price: Number(item.unit_price),
+                total_price: Number(item.total_price),
+                image: item.image,
+              }));
+
+            return {
+              id: ord.id,
+              order_number: ord.order_number,
+              order_type: ord.order_type,
+              customer_name: ord.customer_name,
+              customer_phone: ord.customer_phone,
+              table_number: ord.table_number || undefined,
+              delivery_address: ord.delivery_address || undefined,
+              pickup_time: ord.pickup_time || undefined,
+              notes: ord.notes || undefined,
+              payment_method: ord.payment_method,
+              transfer_from_phone: ord.transfer_from_phone || undefined,
+              amount_transferred: ord.amount_transferred ? Number(ord.amount_transferred) : undefined,
+              items,
+              subtotal: Number(ord.subtotal),
+              delivery_fee: Number(ord.delivery_fee || 0),
+              discount_total: Number(ord.discount_total || 0),
+              total: Number(ord.total),
+              status: ord.status,
+              created_at: ord.created_at,
+              shift_id: ord.shift_id || undefined,
+              is_archived: Boolean(ord.is_archived),
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('[StoreContext] Query error during monthly export:', err);
+      }
+    }
+
+    // Fallback if offline or empty
+    if (monthOrders.length === 0) {
+      monthOrders = orders.filter((o) => {
+        const d = new Date(o.created_at);
+        return d >= startOfMonth && d <= endOfMonth;
+      });
+      targetOrderIds = monthOrders.map((o) => o.id);
+      monthItems = monthOrders.flatMap((o) =>
+        o.items.map((i) => ({
+          ...i,
+          order_id: o.id,
+          order_number: o.order_number,
+          order_date: o.created_at,
+        }))
+      );
+    } else {
+      const orderMap = new Map(monthOrders.map((o) => [o.id, { number: o.order_number, date: o.created_at }]));
+      monthItems = monthItems.map((item) => ({
+        ...item,
+        order_number: orderMap.get(item.order_id)?.number || item.order_id,
+        order_date: orderMap.get(item.order_id)?.date || '',
+      }));
+    }
+
+    // 3. Compute best seller & financial metrics
+    const productSalesMap: Record<string, { product: Product; count: number; revenue: number }> = {};
+    monthOrders.forEach((order) => {
       if (order.status === 'cancelled') return;
       order.items.forEach((item) => {
         const prod = products.find((p) => p.id === item.product_id);
@@ -1374,51 +1532,157 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
 
-    const activeOrders = orders.filter((o) => !o.is_archived);
-    const totalSales = activeOrders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0), 0);
+    const totalSales = monthOrders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0), 0);
 
-    // Build CSV Content
-    let csvContent = 'data:text/csv;charset=utf-8,\uFEFF';
-    csvContent += '--- CHOCOLATE HOUSE MONTHLY FINANCIAL & ORDERS REPORT ---\r\n';
-    csvContent += `Generated At,${new Date().toLocaleString()}\r\n`;
-    csvContent += `Total Orders,${activeOrders.length}\r\n`;
-    csvContent += `Total Gross Revenue (EGP),${totalSales.toFixed(2)}\r\n`;
-    csvContent += `Best Seller Product,"${bestSeller ? (bestSeller as Product).name_en : 'N/A'}" (${highestCount} sold)\r\n\r\n`;
-
-    csvContent += 'Order #,Date,Type,Customer,Phone,Payment,Method Details,Subtotal,Delivery,Total,Status\r\n';
-    activeOrders.forEach((o) => {
-      const details = o.payment_method === 'instapay_wallet' ? `Sender: ${o.transfer_from_phone || 'N/A'}` : 'Cash';
-      csvContent += `"${o.order_number}","${o.created_at}","${o.order_type}","${o.customer_name}","${o.customer_phone}","${o.payment_method}","${details}",${o.subtotal},${o.delivery_fee},${o.total},"${o.status}"\r\n`;
+    const monthShifts = shiftReports.filter((sr) => {
+      const d = new Date(sr.created_at || sr.end_time);
+      return d >= startOfMonth && d <= endOfMonth;
     });
 
-    csvContent += '\r\n--- SHIFT REPORTS AUDIT ---\r\n';
-    csvContent += 'Shift #,Cashier,Start,End,Orders,Total Sales,Cash Sales,Digital Sales,Expenses,Expected Cash,Reported Cash,Discrepancy\r\n';
-    shiftReports.forEach((sr) => {
-      csvContent += `"${sr.shift_number}","${sr.cashier_name}","${sr.start_time}","${sr.end_time}",${sr.total_orders_count},${sr.total_sales},${sr.cash_sales},${sr.digital_sales},${sr.expenses_total},${sr.system_expected_cash},${sr.cashier_reported_cash},${sr.discrepancy}\r\n`;
-    });
+    // 4. Generate Multi-Sheet Excel (.xlsx) using SheetJS (xlsx)
+    const wb = XLSX.utils.book_new();
 
-    // Trigger download
-    const encodedUri = encodeURI(csvContent);
+    // Sheet 1: Orders
+    const ordersSheetData = monthOrders.map((o) => ({
+      'Order #': o.order_number,
+      'Date & Time': new Date(o.created_at).toLocaleString(),
+      'Type': o.order_type,
+      'Customer Name': o.customer_name,
+      'Customer Phone': o.customer_phone,
+      'Table / Address': o.table_number ? `Table #${o.table_number}` : (o.delivery_address || 'Pickup'),
+      'Payment Method': o.payment_method === 'cod' ? 'Cash on Delivery' : 'InstaPay / Wallet',
+      'Sender Phone': o.transfer_from_phone || '',
+      'Transferred Amount': o.amount_transferred || '',
+      'Subtotal (EGP)': o.subtotal,
+      'Delivery Fee (EGP)': o.delivery_fee,
+      'Discount (EGP)': o.discount_total,
+      'Total (EGP)': o.total,
+      'Status': o.status,
+      'Archived by Cashier': o.is_archived ? 'Yes' : 'No',
+      'Notes': o.notes || '',
+    }));
+    const ordersWs = XLSX.utils.json_to_sheet(
+      ordersSheetData.length > 0 ? ordersSheetData : [{ Message: 'No orders recorded for this month' }]
+    );
+    XLSX.utils.book_append_sheet(wb, ordersWs, 'Orders');
+
+    // Sheet 2: Order Items
+    const itemsSheetData = monthItems.map((item) => ({
+      'Order #': item.order_number,
+      'Order Date': item.order_date ? new Date(item.order_date).toLocaleString() : '',
+      'Product Name (EN)': item.product_name_en,
+      'Product Name (AR)': item.product_name_ar,
+      'Quantity': item.quantity,
+      'Unit Price (EGP)': item.unit_price,
+      'Total Price (EGP)': item.total_price,
+    }));
+    const itemsWs = XLSX.utils.json_to_sheet(
+      itemsSheetData.length > 0 ? itemsSheetData : [{ Message: 'No items recorded for this month' }]
+    );
+    XLSX.utils.book_append_sheet(wb, itemsWs, 'Order Items');
+
+    // Sheet 3: Shifts Audit
+    const shiftsSheetData = monthShifts.map((sr) => ({
+      'Shift #': sr.shift_number,
+      'Cashier Name': sr.cashier_name,
+      'Start Time': new Date(sr.start_time).toLocaleString(),
+      'End Time': new Date(sr.end_time).toLocaleString(),
+      'Orders Count': sr.total_orders_count,
+      'Total Sales (EGP)': sr.total_sales,
+      'Cash Sales (EGP)': sr.cash_sales,
+      'Digital Sales (EGP)': sr.digital_sales,
+      'Expenses Total (EGP)': sr.expenses_total,
+      'System Expected Cash (EGP)': sr.system_expected_cash,
+      'Cashier Reported Cash (EGP)': sr.cashier_reported_cash,
+      'Discrepancy (EGP)': sr.discrepancy,
+      'Notes': sr.notes || '',
+    }));
+    const shiftsWs = XLSX.utils.json_to_sheet(
+      shiftsSheetData.length > 0 ? shiftsSheetData : [{ Message: 'No shifts recorded for this month' }]
+    );
+    XLSX.utils.book_append_sheet(wb, shiftsWs, 'Shifts Audit');
+
+    // 5. Trigger download of .xlsx file
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const fileName = `Chocolate_House_Monthly_Export_${monthStr}.xlsx`;
+
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Chocolate_House_Monthly_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.href = url;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
 
-    // Archive active orders in database
-    setOrders((prev) => prev.map((o) => ({ ...o, is_archived: true })));
+    // 6. ONLY AFTER download is triggered: PERMANENTLY DELETE current month orders from Supabase
+    if (supabase) {
+      try {
+        console.info(`[StoreContext] 🗑️ Permanently deleting orders for ${monthStr} from Supabase...`);
+
+        // Delete order_items first if IDs exist
+        if (targetOrderIds.length > 0) {
+          const { error: itemsDelErr } = await supabase
+            .from('order_items')
+            .delete()
+            .in('order_id', targetOrderIds);
+          if (itemsDelErr) {
+            console.warn('[StoreContext] order_items delete notice:', itemsDelErr);
+          }
+        }
+
+        // Delete orders by IDs or date range
+        if (targetOrderIds.length > 0) {
+          const { error: ordersDelErr } = await supabase
+            .from('orders')
+            .delete()
+            .in('id', targetOrderIds);
+          if (ordersDelErr) {
+            console.error('[StoreContext] Supabase delete orders error:', ordersDelErr);
+            throw ordersDelErr;
+          }
+        } else {
+          const { error: ordersDelRangeErr } = await supabase
+            .from('orders')
+            .delete()
+            .gte('created_at', startOfMonthIso)
+            .lte('created_at', endOfMonthIso);
+          if (ordersDelRangeErr) {
+            console.error('[StoreContext] Supabase delete orders by range error:', ordersDelRangeErr);
+          }
+        }
+        console.info('[StoreContext] ✅ Monthly orders permanently deleted from Supabase.');
+      } catch (err: any) {
+        console.error('[StoreContext] Failed deleting monthly orders from Supabase:', err);
+        showToast(
+          language === 'ar'
+            ? `تنبيه: تم تنزيل الملف، ولكن تعذر حذف الطلبات من السحابة: ${err.message || err}`
+            : `Warning: Excel file downloaded, but could not delete orders from cloud: ${err.message || err}`,
+          'warning'
+        );
+      }
+    }
+
+    // 7. Update local state: remove all deleted orders of this month
+    setOrders((prev) =>
+      prev.filter((o) => {
+        const d = new Date(o.created_at);
+        return !(d >= startOfMonth && d <= endOfMonth);
+      })
+    );
+    invalidateCache('orders');
 
     showToast(
       language === 'ar'
-        ? 'تم تصدير التقرير الشهري بنجاح وأرشفة الطلبات السابقة'
-        : 'Monthly report exported & completed orders archived',
+        ? `تم تنزيل ملف الإكسيل وحذف ${monthOrders.length} طلب للشهر الحالي بنجاح من قاعدة البيانات`
+        : `Excel file downloaded and ${monthOrders.length} orders for current month permanently deleted from database`,
       'success'
     );
 
     return {
       bestSeller,
-      totalOrders: activeOrders.length,
+      totalOrders: monthOrders.length,
       totalSales,
     };
   };
