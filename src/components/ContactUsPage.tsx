@@ -181,7 +181,7 @@ export const ContactUsPage: React.FC = () => {
                   <Clock className="w-5 h-5" />
                 </div>
                 <h3 className="font-bold text-base text-[#2B140E]">
-                  {language === 'ar' ? 'ساعات العمل' : 'Opening Hours'}
+                  {language === 'ar' ? 'ساعات العمل' : 'Working Hours'}
                 </h3>
                 <p className="text-xs text-[#2B140E]/70 font-semibold">
                   {language === 'ar' ? siteConfig.openingHours_ar : siteConfig.openingHours_en}

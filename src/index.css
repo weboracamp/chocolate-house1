@@ -36,6 +36,10 @@
   font-family: 'Cairo', sans-serif;
 }
 
+#receipt-print-root {
+  display: none;
+}
+
 /* Custom scrollbar for modern cafe luxury feel */
 ::-webkit-scrollbar {
   width: 6px;
@@ -53,15 +57,16 @@
 }
 
 /* ==============================================================================
-   DEDICATED 80MM THERMAL RECEIPT PRINT STYLING
-   ==============================================================================
-   Fixes blank page print issues by ensuring #thermal-receipt-modal & #thermal-receipt-content
-   remain fully visible (visibility: visible, display: block), while clearing parent clipping,
-   overflow constraints, and background modal overlays.
+   80mm THERMAL RECEIPT PRINT
+   Clone of .receipt-print-area is attached to body as #receipt-print-root.
+   Everything else is display:none so it cannot occupy pages.
+   Do NOT use visibility:hidden (still takes layout space) or page-break-inside
+   on nested receipt blocks (pushes later sections onto extra pages).
    ============================================================================== */
 @media print {
+  /* `80mm auto` is invalid (auto is not a length) and Chrome drops it → A4. */
   @page {
-    size: 80mm auto;
+    size: 80mm 297mm;
     margin: 0;
   }
 
@@ -72,7 +77,6 @@
     background: #ffffff !important;
     color: #000000 !important;
     width: 80mm !important;
-    min-width: 80mm !important;
     max-width: 80mm !important;
     height: auto !important;
     min-height: 0 !important;
@@ -82,67 +86,34 @@
     print-color-adjust: exact !important;
   }
 
-  /* 1. Hide default page layout elements */
-  body * {
-    visibility: hidden;
+  body > *:not(#receipt-print-root) {
+    display: none !important;
   }
 
-  /* 2. Make ancestor tree down to the receipt visible so the print renderer does not drop it */
-  #root,
-  #root > *,
-  #thermal-receipt-modal,
-  #thermal-receipt-modal *,
-  #thermal-receipt-content,
-  #thermal-receipt-content * {
-    visibility: visible !important;
-  }
-
-  /* 3. Strip overlay backdrops and position receipt container at the top */
-  #thermal-receipt-modal {
-    position: static !important;
+  #receipt-print-root {
     display: block !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-    width: 80mm !important;
-    max-width: 80mm !important;
-    min-width: 80mm !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    background: transparent !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    overflow: visible !important;
-  }
-
-  #thermal-receipt-modal > div {
     position: static !important;
-    box-shadow: none !important;
-    border: none !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
+    left: auto !important;
+    top: auto !important;
     width: 80mm !important;
     max-width: 80mm !important;
-    min-width: 80mm !important;
     height: auto !important;
     min-height: 0 !important;
-    max-height: none !important;
-    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
     overflow: visible !important;
   }
 
-  /* 4. Format thermal receipt content container for 80mm width paper roll */
-  #thermal-receipt-content {
-    position: static !important;
+  #receipt-print-root .receipt-print-area,
+  #receipt-print-root #thermal-receipt-content {
     display: block !important;
+    position: static !important;
     width: 80mm !important;
     max-width: 80mm !important;
-    min-width: 80mm !important;
     height: auto !important;
     min-height: 0 !important;
-    max-height: none !important;
-    margin: 0 auto !important;
+    margin: 0 !important;
     padding: 3mm 4mm !important;
     background: #ffffff !important;
     color: #000000 !important;
@@ -150,48 +121,24 @@
     font-size: 11px !important;
     line-height: 1.35 !important;
     box-sizing: border-box !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
     overflow: visible !important;
-    border: none !important;
-    box-shadow: none !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    page-break-before: avoid !important;
+    page-break-after: avoid !important;
   }
 
-  /* 5. Force elements marked with print:hidden or no-print to collapse and hide */
+  #receipt-print-root img {
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
   .print\:hidden,
-  .no-print,
-  header,
-  footer,
-  nav,
-  #cart-drawer,
-  #checkout-modal {
+  .no-print {
     display: none !important;
-    visibility: hidden !important;
-    height: 0 !important;
-    width: 0 !important;
-    overflow: hidden !important;
-  }
-
-  /* 6. Prevent pagination breaks inside receipt sections */
-  #thermal-receipt-content div,
-  #thermal-receipt-content p,
-  #thermal-receipt-content table,
-  #thermal-receipt-content tr,
-  #thermal-receipt-content td,
-  #thermal-receipt-content img,
-  #thermal-receipt-content svg {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  /* 7. Optimize QR code and images for thermal printing sharpness */
-  #thermal-receipt-content img {
-    image-rendering: -webkit-optimize-contrast;
-    image-rendering: crisp-edges;
-    image-rendering: pixelated;
-    display: block;
-    margin-left: auto;
-    margin-right: auto;
   }
 }
 

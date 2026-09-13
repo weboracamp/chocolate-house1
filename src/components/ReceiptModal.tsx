@@ -1,10 +1,44 @@
-import React from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
 import { X, Printer, CheckCircle2, MapPin } from 'lucide-react';
 
+const RECEIPT_PRINT_ROOT_ID = 'receipt-print-root';
+
+function mountReceiptPrintClone(): void {
+  const source = document.getElementById('thermal-receipt-content');
+  document.getElementById(RECEIPT_PRINT_ROOT_ID)?.remove();
+  if (!source) return;
+  const root = document.createElement('div');
+  root.id = RECEIPT_PRINT_ROOT_ID;
+  root.appendChild(source.cloneNode(true));
+  document.body.appendChild(root);
+}
+
+function unmountReceiptPrintClone(): void {
+  document.getElementById(RECEIPT_PRINT_ROOT_ID)?.remove();
+}
+
 export const ReceiptModal: React.FC = () => {
   const { language, t, activeReceiptOrder, setActiveReceiptOrder } = useStore();
+
+  useEffect(() => {
+    const onBeforePrint = () => mountReceiptPrintClone();
+    const onAfterPrint = () => unmountReceiptPrintClone();
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+      unmountReceiptPrintClone();
+    };
+  }, [activeReceiptOrder]);
+
+  const handlePrint = useCallback(() => {
+    mountReceiptPrintClone();
+    window.print();
+    window.setTimeout(unmountReceiptPrintClone, 500);
+  }, []);
 
   if (!activeReceiptOrder) return null;
 
@@ -15,17 +49,12 @@ export const ReceiptModal: React.FC = () => {
   // Generates 150x150 QR code directly encoding the exact Google Maps URL
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=4&data=${encodeURIComponent(storeGoogleMapsUrl)}`;
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
-    /* Outer Modal Container: Configured with id="thermal-receipt-modal" and print styles to prevent blank pages during window.print() */
     <div
       id="thermal-receipt-modal"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block print:w-[80mm] print:max-w-[80mm] print:h-auto print:min-h-0 print:mx-auto"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 no-print"
     >
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible print:h-auto print:min-h-0 print:mx-auto">
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 no-print-chrome">
         {/* Top bar (Hidden when printing via .print:hidden) */}
         <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
@@ -55,7 +84,7 @@ export const ReceiptModal: React.FC = () => {
         {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
         <div
           id="thermal-receipt-content"
-          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2.5 print:space-y-3 print:w-[80mm] print:max-w-[80mm] print:mx-auto print:h-auto print:min-h-0"
+          className="receipt-print-area p-6 text-black bg-white font-mono text-xs space-y-4"
         >
           {/* Receipt Header */}
           <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">

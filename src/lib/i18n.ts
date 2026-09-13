@@ -95,7 +95,7 @@ export const translations = {
     openGoogleMaps: 'Open in Google Maps',
     phoneTitle: 'Direct Cafe Hotline / WhatsApp',
     openingHours: 'Opening Hours',
-    hoursText: 'Open Daily: 10:00 AM – 02:00 AM',
+    hoursText: 'Open Daily: 11:00 AM – 4:00 AM (next day)',
     allRightsReserved: 'All rights reserved.',
     
     // Cashier & Owner Common
@@ -295,7 +295,7 @@ export const translations = {
     openGoogleMaps: 'فتح الموقع على خرائط جوجل',
     phoneTitle: 'الخط الساخن للكافيه / واتساب',
     openingHours: 'مواعيد العمل',
-    hoursText: 'يومياً: من ١٠:٠٠ صباحاً حتى ٠٢:٠٠ بعد منتصف الليل',
+    hoursText: 'يومياً: ١١:٠٠ ص – ٤:٠٠ ص (اليوم التالي)',
     allRightsReserved: 'جميع الحقوق محفوظة.',
     
     // Cashier & Owner Common

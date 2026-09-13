@@ -13,8 +13,8 @@ export const INITIAL_SITE_CONFIG: SiteConfig = {
   address_en: 'Salah Salem ST, Al Hawamdeya Giza',
   address_ar: 'شارع صلاح سالم، الحوامدية، محافظة الجيزة',
   googleMapsUrl: 'https://maps.app.goo.gl/AxWMKsKdfzpvW4gv5?g_st=ic',
-  openingHours_en: 'Daily: 10:00 AM – 02:00 AM',
-  openingHours_ar: 'يومياً: ١٠:٠٠ صباحاً – ٠٢:٠٠ بعد منتصف الليل',
+  openingHours_en: 'Daily: 11:00 AM – 4:00 AM (next day)',
+  openingHours_ar: 'يومياً: ١١:٠٠ ص – ٤:٠٠ ص (اليوم التالي)',
   deliveryNotice_en: 'Fast local delivery across Al Hawamdeya and nearby areas in Giza',
   deliveryNotice_ar: 'توصيل سريع لكافة أنحاء الحوامدية والمناطق المجاورة بمحافظة الجيزة',
 };

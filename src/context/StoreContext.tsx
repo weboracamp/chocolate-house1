@@ -211,10 +211,11 @@ function assembleOrders(ordersData: any[], itemsData: any[] | null): Order[] {
 }
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // 1. Language State (Default: 'en' as required)
+  // 1. Language State (Default: Arabic for first-time visitors)
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.LANGUAGE);
-    return (saved === 'ar' ? 'ar' : 'en') as Language;
+    if (saved === 'en' || saved === 'ar') return saved;
+    return 'ar';
   });
 
   const setLanguage = (lang: Language) => {
