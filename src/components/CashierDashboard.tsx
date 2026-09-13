@@ -54,15 +54,7 @@ export const CashierDashboard: React.FC = () => {
     logout,
     setActiveView,
     showToast,
-    currentShiftId,
-    ensureActiveShiftReport,
   } = useStore();
-
-  React.useEffect(() => {
-    if (currentUser) {
-      ensureActiveShiftReport(currentShiftId, currentUser.name);
-    }
-  }, [currentShiftId, currentUser, ensureActiveShiftReport]);
 
   // 1. Strict Role & Auth Guard
   if (isAuthLoading) {
@@ -114,7 +106,6 @@ export const CashierDashboard: React.FC = () => {
   const [physicalCashInput, setPhysicalCashInput] = useState('');
   const [shiftNotes, setShiftNotes] = useState('');
   const [shiftCompletedReport, setShiftCompletedReport] = useState<any>(null);
-  const [isClosingShift, setIsClosingShift] = useState(false);
 
   // Financial Calculations for the Shift
   const validDailyOrders = dailyOrders.filter((o) => o.status !== 'cancelled');
@@ -327,25 +318,18 @@ export const CashierDashboard: React.FC = () => {
     setIsExpenseModalOpen(false);
   };
 
-  const handleEndShiftSubmit = async (e: React.FormEvent) => {
+  const handleEndShiftSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const physicalAmount = parseFloat(physicalCashInput);
     if (isNaN(physicalAmount) || physicalAmount < 0) return;
 
-    setIsClosingShift(true);
-    try {
-      const report = await endShiftAndReconcile(
-        physicalAmount,
-        currentUser?.name || 'Cashier',
-        shiftNotes.trim() || undefined
-      );
+    const report = endShiftAndReconcile(
+      physicalAmount,
+      currentUser?.name || 'Cashier',
+      shiftNotes.trim() || undefined
+    );
 
-      setShiftCompletedReport(report);
-    } catch (err) {
-      console.error('Error ending shift:', err);
-    } finally {
-      setIsClosingShift(false);
-    }
+    setShiftCompletedReport(report);
   };
 
   const categoriesList = [
@@ -1550,20 +1534,12 @@ export const CashierDashboard: React.FC = () => {
                   <button
                     type="submit"
                     id="submit-end-shift-btn"
-                    disabled={isClosingShift}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95"
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    {isClosingShift ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1A0A06]" />
-                        <span>{language === 'ar' ? 'جارٍ إغلاق الوردية...' : 'Closing Shift...'}</span>
-                      </>
-                    ) : (
-                      t.confirmResetShift
-                    )}
+                    {t.confirmResetShift}
                   </button>
                 </div>
               </form>

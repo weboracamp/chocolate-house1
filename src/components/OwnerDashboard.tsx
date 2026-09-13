@@ -91,7 +91,6 @@ export const OwnerDashboard: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportedSummary, setExportedSummary] = useState<any>(null);
   const [copiedEmails, setCopiedEmails] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
 
   // Selected message for detail view
   const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
@@ -241,16 +240,9 @@ export const OwnerDashboard: React.FC = () => {
     }
   };
 
-  const handleExecuteExportAndReset = async () => {
-    setIsExporting(true);
-    try {
-      const result = await exportAndResetMonthlyData();
-      setExportedSummary(result);
-    } catch (err: any) {
-      console.error('[OwnerDashboard] Export error:', err);
-    } finally {
-      setIsExporting(false);
-    }
+  const handleExecuteExportAndReset = () => {
+    const result = exportAndResetMonthlyData();
+    setExportedSummary(result);
   };
 
   return (
@@ -814,20 +806,9 @@ export const OwnerDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {shiftReports.map((sr) => {
-                        const isOpen = sr.status === 'open' || sr.notes === 'active';
-                        return (
+                      {shiftReports.map((sr) => (
                         <tr key={sr.id} className="hover:bg-amber-50/40">
-                          <td className="p-3.5 font-mono font-bold">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span>{sr.shift_number}</span>
-                              {isOpen && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                                  {language === 'ar' ? 'جارية' : 'Open'}
-                                </span>
-                              )}
-                            </div>
-                          </td>
+                          <td className="p-3.5 font-mono font-bold">{sr.shift_number}</td>
                           <td className="p-3.5 font-semibold">{sr.cashier_name}</td>
                           <td className="p-3.5">{sr.total_orders_count}</td>
                           <td className="p-3.5 font-bold font-mono">{sr.total_sales.toFixed(2)} EGP</td>
@@ -842,30 +823,23 @@ export const OwnerDashboard: React.FC = () => {
                             {sr.cashier_reported_cash.toFixed(2)} EGP
                           </td>
                           <td className="p-3.5 font-mono font-black">
-                            {isOpen ? (
-                              <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                                {language === 'ar' ? 'وردية جارية' : 'In Progress'}
-                              </span>
-                            ) : (
-                              <span
-                                className={`px-2 py-0.5 rounded-md ${
-                                  sr.discrepancy === 0
-                                    ? 'bg-green-100 text-green-800'
-                                    : sr.discrepancy > 0
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : 'bg-rose-100 text-rose-800'
-                                }`}
-                              >
-                                {sr.discrepancy >= 0 ? `+${sr.discrepancy}` : sr.discrepancy} EGP
-                              </span>
-                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded-md ${
+                                sr.discrepancy === 0
+                                  ? 'bg-green-100 text-green-800'
+                                  : sr.discrepancy > 0
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {sr.discrepancy >= 0 ? `+${sr.discrepancy}` : sr.discrepancy} EGP
+                            </span>
                           </td>
                           <td className="p-3.5 text-[10px] text-gray-500">
                             {new Date(sr.created_at).toLocaleString()}
                           </td>
                         </tr>
-                      );
-                      })}
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1493,20 +1467,12 @@ export const OwnerDashboard: React.FC = () => {
                   </button>
                   <button
                     onClick={handleExecuteExportAndReset}
-                    disabled={isExporting}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95"
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    {isExporting ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1A0A06]" />
-                        <span>{language === 'ar' ? 'جارٍ توليد ملف Excel وحذف البيانات...' : 'Generating Excel & Archiving...'}</span>
-                      </>
-                    ) : (
-                      language === 'ar' ? 'تحميل ملف Excel (.xlsx) والأرشفة' : 'Download Excel (.xlsx) & Archive'
-                    )}
+                    Download Excel/CSV & Archive
                   </button>
                 </div>
               </div>
@@ -1516,15 +1482,9 @@ export const OwnerDashboard: React.FC = () => {
                   <Sparkles className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-[#2B140E]">
-                  {language === 'ar' ? 'اكتمل تصدير ملف Excel بنجاح!' : 'Excel Export Complete & Data Cleared!'}
+                  Export Complete & Data Archived!
                 </h3>
                 <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 text-xs space-y-1.5 text-left">
-                  {exportedSummary.filename && (
-                    <div className="flex justify-between font-mono text-[11px] text-gray-500 pb-1 border-b">
-                      <span>File:</span>
-                      <span className="truncate max-w-[200px]">{exportedSummary.filename}</span>
-                    </div>
-                  )}
                   <div className="flex justify-between">
                     <span>Exported Orders:</span>
                     <span className="font-bold">{exportedSummary.totalOrders}</span>
