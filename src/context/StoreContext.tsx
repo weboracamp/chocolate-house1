@@ -143,6 +143,73 @@ const STORAGE_KEYS = {
   NEWSLETTER_SUBSCRIBERS: 'ch_newsletter_subscribers',
 };
 
+const REALTIME_TABLES = [
+  'products',
+  'orders',
+  'order_items',
+  'contact_messages',
+  'newsletter_subscribers',
+] as const;
+
+function normalizeProductRow(row: any): Product {
+  return {
+    id: row.id,
+    name_en: row.name_en,
+    name_ar: row.name_ar,
+    description_en: row.description_en || '',
+    description_ar: row.description_ar || '',
+    price: Number(row.price),
+    discount_price: row.discount_price != null ? Number(row.discount_price) : undefined,
+    category: row.category,
+    stock: Number(row.stock),
+    image: row.image,
+    is_best_seller: Boolean(row.is_best_seller),
+    is_new: Boolean(row.is_new),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function assembleOrders(ordersData: any[], itemsData: any[] | null): Order[] {
+  return ordersData.map((ord: any) => {
+    const items = (itemsData || [])
+      .filter((item: any) => item.order_id === ord.id)
+      .map((item: any) => ({
+        product_id: item.product_id || '',
+        product_name_en: item.product_name_en,
+        product_name_ar: item.product_name_ar,
+        quantity: item.quantity,
+        unit_price: Number(item.unit_price),
+        total_price: Number(item.total_price),
+        image: item.image,
+      }));
+
+    return {
+      id: ord.id,
+      order_number: ord.order_number,
+      order_type: ord.order_type,
+      customer_name: ord.customer_name,
+      customer_phone: ord.customer_phone,
+      table_number: ord.table_number || undefined,
+      delivery_address: ord.delivery_address || undefined,
+      pickup_time: ord.pickup_time || undefined,
+      notes: ord.notes || undefined,
+      payment_method: ord.payment_method,
+      transfer_from_phone: ord.transfer_from_phone || undefined,
+      amount_transferred: ord.amount_transferred ? Number(ord.amount_transferred) : undefined,
+      items,
+      subtotal: Number(ord.subtotal),
+      delivery_fee: Number(ord.delivery_fee || 0),
+      discount_total: Number(ord.discount_total || 0),
+      total: Number(ord.total),
+      status: ord.status,
+      created_at: ord.created_at,
+      shift_id: ord.shift_id || undefined,
+      is_archived: Boolean(ord.is_archived),
+    };
+  });
+}
+
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // 1. Language State (Default: 'en' as required)
   const [language, setLanguageState] = useState<Language>(() => {
@@ -283,7 +350,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (supabase) {
       const fetchInitialData = async () => {
         try {
-          // 0. Fetch products through caching layer (TTL: 10 mins)
+          // 0. Fetch products through caching layer (TTL: 15s fallback; Realtime invalidates immediately)
           const { data: remoteProducts, fromCache: prodFromCache, error: prodError } = await cachedSupabaseQuery<Product[]>(
             'products',
             async () => {
@@ -291,7 +358,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 .from('products')
                 .select('*')
                 .order('created_at', { ascending: false });
-              return { data: res.data as Product[], error: res.error };
+              return { data: (res.data || []).map(normalizeProductRow), error: res.error };
             },
             { table: 'products' }
           );
@@ -383,45 +450,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 .from('order_items')
                 .select('*');
 
-              const mappedOrders: Order[] = ordersData.map((ord: any) => {
-                const items = (itemsData || [])
-                  .filter((item: any) => item.order_id === ord.id)
-                  .map((item: any) => ({
-                    product_id: item.product_id || '',
-                    product_name_en: item.product_name_en,
-                    product_name_ar: item.product_name_ar,
-                    quantity: item.quantity,
-                    unit_price: Number(item.unit_price),
-                    total_price: Number(item.total_price),
-                    image: item.image,
-                  }));
-
-                return {
-                  id: ord.id,
-                  order_number: ord.order_number,
-                  order_type: ord.order_type,
-                  customer_name: ord.customer_name,
-                  customer_phone: ord.customer_phone,
-                  table_number: ord.table_number || undefined,
-                  delivery_address: ord.delivery_address || undefined,
-                  pickup_time: ord.pickup_time || undefined,
-                  notes: ord.notes || undefined,
-                  payment_method: ord.payment_method,
-                  transfer_from_phone: ord.transfer_from_phone || undefined,
-                  amount_transferred: ord.amount_transferred ? Number(ord.amount_transferred) : undefined,
-                  items,
-                  subtotal: Number(ord.subtotal),
-                  delivery_fee: Number(ord.delivery_fee || 0),
-                  discount_total: Number(ord.discount_total || 0),
-                  total: Number(ord.total),
-                  status: ord.status,
-                  created_at: ord.created_at,
-                  shift_id: ord.shift_id || undefined,
-                  is_archived: Boolean(ord.is_archived),
-                };
-              });
-
-              return { data: mappedOrders, error: null };
+              return { data: assembleOrders(ordersData, itemsData), error: null };
             },
             { table: 'orders' }
           );
@@ -492,6 +521,162 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       fetchInitialData();
     }
+  }, []);
+
+  // Live sync: products (stock), orders, order_items, contact_messages, newsletter_subscribers
+  useEffect(() => {
+    if (!supabase) return;
+
+    const client = supabase;
+    let cancelled = false;
+
+    const refetchContactMessages = async () => {
+      const { data, error } = await cachedSupabaseQuery<ContactMessage[]>(
+        'contact_messages',
+        async () => {
+          const res = await client
+            .from('contact_messages')
+            .select('*')
+            .order('created_at', { ascending: false });
+          return { data: res.data as ContactMessage[], error: res.error };
+        },
+        { table: 'contact_messages', forceRefresh: true }
+      );
+      if (!cancelled && !error && Array.isArray(data)) {
+        setContactMessages(data);
+      }
+    };
+
+    const refetchNewsletterSubscribers = async () => {
+      const { data, error } = await cachedSupabaseQuery<NewsletterSubscriber[]>(
+        'newsletter_subscribers',
+        async () => {
+          const res = await client
+            .from('newsletter_subscribers')
+            .select('*')
+            .order('created_at', { ascending: false });
+          return { data: res.data as NewsletterSubscriber[], error: res.error };
+        },
+        { table: 'newsletter_subscribers', forceRefresh: true }
+      );
+      if (!cancelled && !error && Array.isArray(data)) {
+        setNewsletterSubscribers(data);
+      }
+    };
+
+    const refetchOrders = async () => {
+      const { data, error } = await cachedSupabaseQuery<Order[]>(
+        'orders',
+        async () => {
+          const { data: ordersData, error: ordersErr } = await client
+            .from('orders')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (ordersErr || !ordersData) return { data: null, error: ordersErr };
+          const { data: itemsData } = await client.from('order_items').select('*');
+          return { data: assembleOrders(ordersData, itemsData), error: null };
+        },
+        { table: 'orders', forceRefresh: true }
+      );
+      if (!cancelled && !error && Array.isArray(data)) {
+        setOrders((prevLocal) => {
+          const remoteMap = new Map(data.map((ro) => [ro.id, ro]));
+          const unsyncedLocal = prevLocal.filter((lo) => lo.id.startsWith('ord-local-') && !remoteMap.has(lo.id));
+          return [...data, ...unsyncedLocal];
+        });
+      }
+    };
+
+    const refetchProducts = async () => {
+      const { data, error } = await cachedSupabaseQuery<Product[]>(
+        'products',
+        async () => {
+          const res = await client
+            .from('products')
+            .select('*')
+            .order('created_at', { ascending: false });
+          return { data: (res.data || []).map(normalizeProductRow), error: res.error };
+        },
+        { table: 'products', forceRefresh: true }
+      );
+      if (!cancelled && !error && Array.isArray(data)) {
+        setProducts(data);
+      }
+    };
+
+    const channel = client
+      .channel('ch-realtime-core')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          invalidateCache('products');
+          if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id?: string } | null)?.id;
+            if (deletedId) {
+              setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+            } else {
+              void refetchProducts();
+            }
+            return;
+          }
+          const row = payload.new as Record<string, any> | null;
+          if (row?.id) {
+            const incoming = normalizeProductRow(row);
+            setProducts((prev) => {
+              const idx = prev.findIndex((p) => p.id === incoming.id);
+              if (idx === -1) return [incoming, ...prev];
+              const next = [...prev];
+              next[idx] = { ...next[idx], ...incoming };
+              return next;
+            });
+            return;
+          }
+          void refetchProducts();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        () => {
+          invalidateCache('orders');
+          void refetchOrders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'order_items' },
+        () => {
+          invalidateCache('orders');
+          void refetchOrders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'contact_messages' },
+        () => {
+          invalidateCache('contact_messages');
+          void refetchContactMessages();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'newsletter_subscribers' },
+        () => {
+          invalidateCache('newsletter_subscribers');
+          void refetchNewsletterSubscribers();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.info(`[StoreContext] Realtime subscribed: ${REALTIME_TABLES.join(', ')}`);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      void client.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {

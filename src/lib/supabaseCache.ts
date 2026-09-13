@@ -9,14 +9,14 @@
  * 
  * Key Features:
  * 1. Multi-Tier Cache: High-speed In-Memory cache + persistent localStorage cache.
- * 2. Configurable TTL / Stale Times per entity (e.g., 10 mins for products, 5 mins for messages).
- * 3. Automatic Cache Invalidation: Triggers on mutations (insert, update, delete).
+ * 2. Configurable TTL / Stale Times per entity (e.g., 15s fallback for products, 5 mins for messages).
+ * 3. Automatic Cache Invalidation: Triggers on mutations (insert, update, delete) and Realtime events.
  * 4. Stale-While-Revalidate support: Returns cached data immediately while optionally refreshing.
  * 5. Safe Fallbacks: Gracefully handles network outages or missing Supabase tables.
  * 
  * How to adjust Cache Expiration Time:
  * Update the `CACHE_TTL_CONFIG` object below with desired milliseconds.
- * Example: To change products TTL to 15 minutes, set `products: 15 * 60 * 1000`.
+ * Example: To change products TTL to 30 seconds, set `products: 30 * 1000`.
  * ==============================================================================
  */
 
@@ -27,8 +27,8 @@ import { supabase } from './supabase';
  * Customize these values to tune freshness vs. API request reduction.
  */
 export const CACHE_TTL_CONFIG = {
-  // Products change infrequently -> 10 minutes cache
-  products: 10 * 60 * 1000,
+  // Products stock is Realtime-invalidated; 15s TTL is only a fallback if Realtime has not fired yet
+  products: 15 * 1000,
 
   // Contact messages & inquiries -> 3 minutes cache
   contact_messages: 3 * 60 * 1000,

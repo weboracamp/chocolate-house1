@@ -257,4 +257,32 @@ CREATE POLICY "Public can subscribe to newsletter" ON public.newsletter_subscrib
 DROP POLICY IF EXISTS "Staff can manage newsletter subscribers" ON public.newsletter_subscribers;
 CREATE POLICY "Staff can manage newsletter subscribers" ON public.newsletter_subscribers
   FOR ALL USING (true);
+
+-- ==============================================================================
+-- SUPABASE REALTIME PUBLICATION
+-- Stock updates (via the order_items trigger) and other live tables
+-- ==============================================================================
+ALTER TABLE public.products REPLICA IDENTITY FULL;
+ALTER TABLE public.orders REPLICA IDENTITY FULL;
+ALTER TABLE public.order_items REPLICA IDENTITY FULL;
+ALTER TABLE public.contact_messages REPLICA IDENTITY FULL;
+ALTER TABLE public.newsletter_subscribers REPLICA IDENTITY FULL;
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['products', 'orders', 'order_items', 'contact_messages', 'newsletter_subscribers']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+    END IF;
+  END LOOP;
+END $$;
 `;
