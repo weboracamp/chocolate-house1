@@ -62,20 +62,24 @@
 @media print {
   @page {
     size: 80mm auto;
-    margin: 0mm;
+    margin: 0 auto;
   }
 
   html,
   body {
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
-    width: 80mm !important;
-    min-width: 80mm !important;
-    max-width: 80mm !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -96,21 +100,35 @@
     visibility: visible !important;
   }
 
-  /* 3. Strip overlay backdrops and position receipt container at the top */
+  #root,
+  #root > * {
+    width: 100% !important;
+    margin: 0 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+  }
+
+  /* 3. Strip overlay backdrops and position receipt container centered at the top */
   #thermal-receipt-modal {
-    position: fixed !important;
-    left: 0 !important;
+    position: static !important;
+    left: auto !important;
+    right: auto !important;
     top: 0 !important;
-    width: 80mm !important;
-    max-width: 80mm !important;
-    min-width: 80mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
     height: auto !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     background: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-    display: block !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
     overflow: visible !important;
     z-index: 999999 !important;
   }
@@ -118,7 +136,7 @@
   #thermal-receipt-modal > div {
     box-shadow: none !important;
     border: none !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     width: 80mm !important;
     max-width: 80mm !important;
@@ -134,7 +152,7 @@
     width: 80mm !important;
     max-width: 80mm !important;
     min-width: 80mm !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 3mm 4mm !important;
     background: #ffffff !important;
     color: #000000 !important;

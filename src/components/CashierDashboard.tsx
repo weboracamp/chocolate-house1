@@ -106,6 +106,7 @@ export const CashierDashboard: React.FC = () => {
   const [physicalCashInput, setPhysicalCashInput] = useState('');
   const [shiftNotes, setShiftNotes] = useState('');
   const [shiftCompletedReport, setShiftCompletedReport] = useState<any>(null);
+  const [isClosingShift, setIsClosingShift] = useState(false);
 
   // Financial Calculations for the Shift
   const validDailyOrders = dailyOrders.filter((o) => o.status !== 'cancelled');
@@ -318,18 +319,25 @@ export const CashierDashboard: React.FC = () => {
     setIsExpenseModalOpen(false);
   };
 
-  const handleEndShiftSubmit = (e: React.FormEvent) => {
+  const handleEndShiftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const physicalAmount = parseFloat(physicalCashInput);
     if (isNaN(physicalAmount) || physicalAmount < 0) return;
 
-    const report = endShiftAndReconcile(
-      physicalAmount,
-      currentUser?.name || 'Cashier',
-      shiftNotes.trim() || undefined
-    );
+    setIsClosingShift(true);
+    try {
+      const report = await endShiftAndReconcile(
+        physicalAmount,
+        currentUser?.name || 'Cashier',
+        shiftNotes.trim() || undefined
+      );
 
-    setShiftCompletedReport(report);
+      setShiftCompletedReport(report);
+    } catch (err) {
+      console.error('Error ending shift:', err);
+    } finally {
+      setIsClosingShift(false);
+    }
   };
 
   const categoriesList = [
@@ -1534,12 +1542,20 @@ export const CashierDashboard: React.FC = () => {
                   <button
                     type="submit"
                     id="submit-end-shift-btn"
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95"
+                    disabled={isClosingShift}
+                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] transition-all shadow-md active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    {t.confirmResetShift}
+                    {isClosingShift ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1A0A06]" />
+                        <span>{language === 'ar' ? 'جارٍ إغلاق الوردية...' : 'Closing Shift...'}</span>
+                      </>
+                    ) : (
+                      t.confirmResetShift
+                    )}
                   </button>
                 </div>
               </form>

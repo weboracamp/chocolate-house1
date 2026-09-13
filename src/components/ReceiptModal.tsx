@@ -20,12 +20,12 @@ export const ReceiptModal: React.FC = () => {
   };
 
   return (
-    /* Outer Modal Container: Configured with id="thermal-receipt-modal" and print styles to prevent blank pages during window.print() */
+    /* Outer Modal Container: Configured with id="thermal-receipt-modal" and print styles to ensure centered receipt on thermal paper / print preview */
     <div
       id="thermal-receipt-modal"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:w-full print:flex print:flex-col print:items-center print:justify-start"
     >
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible">
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 print:my-0 print:mx-auto print:border-none print:shadow-none print:w-[80mm] print:max-w-[80mm] print:rounded-none print:overflow-visible">
         {/* Top bar (Hidden when printing via .print:hidden) */}
         <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
@@ -52,36 +52,36 @@ export const ReceiptModal: React.FC = () => {
           </div>
         </div>
 
-        {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
+        {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT - CENTERED */}
         <div
           id="thermal-receipt-content"
-          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2 print:space-y-3"
+          className="p-6 text-black bg-white font-mono text-xs space-y-4 print:p-2 print:space-y-3 print:mx-auto print:w-[80mm] print:max-w-[80mm]"
         >
-          {/* Receipt Header */}
-          <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">
+          {/* Receipt Header - Centered */}
+          <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4 flex flex-col items-center justify-center">
             <div className="flex justify-center pb-1">
               <Logo size="sm" />
             </div>
-            <h1 className="text-base font-black tracking-wider uppercase">
+            <h1 className="text-base font-black tracking-wider uppercase text-center">
               Chocolate House - شوكلت هاوس
             </h1>
-            <p className="text-[10px] text-gray-700">
+            <p className="text-[10px] text-gray-700 text-center">
               Salah Salem ST, Al Hawamdeya Giza
             </p>
-            <p className="text-[10px] text-gray-700">
-              Tel: 01113116242 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
+            <p className="text-[10px] text-gray-700 text-center">
+              Tel: 01112437437 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
             </p>
-            <div className="pt-2 text-xs font-bold">
+            <div className="pt-2 text-xs font-bold text-center">
               <span>{t.orderNumber}: </span>
               <span className="text-sm">{order.order_number}</span>
             </div>
-            <p className="text-[10px] text-gray-600">
+            <p className="text-[10px] text-gray-600 text-center">
               {new Date(order.created_at).toLocaleString()}
             </p>
           </div>
 
-          {/* Customer & Order Metadata */}
-          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3">
+          {/* Customer & Order Metadata - Centered block */}
+          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3 w-full mx-auto">
             <div className="flex justify-between">
               <span className="font-semibold">{t.orderType}:</span>
               <span className="font-bold uppercase">
@@ -120,8 +120,8 @@ export const ReceiptModal: React.FC = () => {
             )}
           </div>
 
-          {/* Itemized Table */}
-          <div className="space-y-2 border-b border-dashed border-gray-400 pb-3">
+          {/* Itemized Table - Centered Block */}
+          <div className="space-y-2 border-b border-dashed border-gray-400 pb-3 w-full mx-auto">
             <div className="flex justify-between font-bold text-[10px] uppercase text-gray-600">
               <span>Item / Qty</span>
               <span>Price</span>
@@ -129,7 +129,7 @@ export const ReceiptModal: React.FC = () => {
 
             {order.items.map((item, idx) => (
               <div key={idx} className="flex justify-between items-start text-xs">
-                <div className="flex-1 pr-2">
+                <div className="flex-1 pr-2 text-left rtl:text-right">
                   <span className="font-bold block">
                     {language === 'ar' ? item.product_name_ar : item.product_name_en}
                   </span>
@@ -137,15 +137,15 @@ export const ReceiptModal: React.FC = () => {
                     {item.quantity} × {item.unit_price} EGP
                   </span>
                 </div>
-                <span className="font-bold text-right shrink-0">
+                <span className="font-bold text-right rtl:text-left shrink-0">
                   {item.total_price} EGP
                 </span>
               </div>
             ))}
           </div>
 
-          {/* Totals Breakdown */}
-          <div className="space-y-1 text-xs border-b border-dashed border-gray-400 pb-3">
+          {/* Totals Breakdown - Centered Block */}
+          <div className="space-y-1 text-xs border-b border-dashed border-gray-400 pb-3 w-full mx-auto">
             <div className="flex justify-between">
               <span>{t.subtotal}:</span>
               <span>{order.subtotal} EGP</span>
@@ -168,8 +168,8 @@ export const ReceiptModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Payment Method & Verification */}
-          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3">
+          {/* Payment Method & Verification - Centered Block */}
+          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3 w-full mx-auto">
             <div className="flex justify-between">
               <span className="font-semibold">{t.paymentMethod}:</span>
               <span className="font-bold">
@@ -191,14 +191,14 @@ export const ReceiptModal: React.FC = () => {
             )}
 
             {order.notes && (
-              <div className="pt-1 text-[10px] text-gray-600">
+              <div className="pt-1 text-[10px] text-gray-600 text-left rtl:text-right">
                 <strong>Notes: </strong> {order.notes}
               </div>
             )}
           </div>
 
-          {/* Functional Google Maps Location QR Code & Footer */}
-          <div className="text-center pt-2 space-y-2">
+          {/* Functional Google Maps Location QR Code & Footer - Centered */}
+          <div className="text-center pt-2 space-y-2 w-full mx-auto flex flex-col items-center justify-center">
             <div className="flex flex-col items-center justify-center space-y-1">
               <img
                 src={qrCodeUrl}

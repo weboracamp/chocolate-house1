@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Product,
   Order,
@@ -31,7 +31,9 @@ import {
   invalidateAllCache,
   CACHE_TTL_CONFIG,
 } from '../lib/supabaseCache';
+import { playNewOrderSound, isSoundEnabled, setSoundEnabled } from '../lib/soundAlert';
 import confetti from 'canvas-confetti';
+import * as XLSX from 'xlsx';
 
 interface Toast {
   id: string;
@@ -102,10 +104,10 @@ interface StoreContextType {
   // Shifts
   shiftReports: ShiftReport[];
   currentShiftId: string;
-  endShiftAndReconcile: (cashierReportedCash: number, cashierName: string, notes?: string) => ShiftReport;
+  endShiftAndReconcile: (cashierReportedCash: number, cashierName: string, notes?: string) => Promise<ShiftReport>;
   
   // Monthly Export & Reset (Owner)
-  exportAndResetMonthlyData: () => { bestSeller: Product | null; totalOrders: number; totalSales: number };
+  exportAndResetMonthlyData: () => Promise<{ bestSeller: Product | null; totalOrders: number; totalSales: number; filename: string }>;
   
   // Auth
   currentUser: UserProfile | null;
@@ -485,6 +487,296 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchInitialData();
     }
   }, []);
+
+  // Supabase Realtime Subscriptions for:
+  // 1. orders (INSERT, UPDATE, DELETE)
+  // 2. order_items (INSERT, UPDATE, DELETE)
+  // 3. contact_messages (INSERT, UPDATE, DELETE)
+  // 4. newsletter_subscribers (INSERT, UPDATE, DELETE)
+  useEffect(() => {
+    if (!supabase) return;
+
+    console.info('[StoreContext] 📡 Initializing Supabase Realtime channels...');
+
+    const channel = supabase
+      .channel('store-realtime-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        async (payload) => {
+          console.info('[StoreContext] 🔔 Realtime orders event:', payload.eventType, payload);
+
+          if (payload.eventType === 'INSERT') {
+            const raw = payload.new as any;
+            if (!raw || !raw.id) return;
+
+            // Check if this order is already in our local state (e.g. placed by current tab)
+            let alreadyExists = false;
+            setOrders((prev) => {
+              if (prev.some((o) => o.id === raw.id)) {
+                alreadyExists = true;
+                return prev;
+              }
+              return prev;
+            });
+
+            if (alreadyExists) return;
+
+            // Fetch order items for this order from Supabase
+            let items: OrderItem[] = [];
+            try {
+              const { data: itemsData } = await supabase!
+                .from('order_items')
+                .select('*')
+                .eq('order_id', raw.id);
+
+              if (itemsData && itemsData.length > 0) {
+                items = itemsData.map((item: any) => ({
+                  product_id: item.product_id || '',
+                  product_name_en: item.product_name_en,
+                  product_name_ar: item.product_name_ar,
+                  quantity: Number(item.quantity) || 1,
+                  unit_price: Number(item.unit_price) || 0,
+                  total_price: Number(item.total_price) || 0,
+                  image: item.image || '',
+                }));
+              }
+            } catch (err) {
+              console.warn('[StoreContext] Error fetching order items for new order:', err);
+            }
+
+            const incomingOrder: Order = {
+              id: raw.id,
+              order_number: raw.order_number,
+              order_type: raw.order_type,
+              customer_name: raw.customer_name,
+              customer_phone: raw.customer_phone,
+              table_number: raw.table_number || undefined,
+              delivery_address: raw.delivery_address || undefined,
+              pickup_time: raw.pickup_time || undefined,
+              notes: raw.notes || undefined,
+              payment_method: raw.payment_method,
+              transfer_from_phone: raw.transfer_from_phone || undefined,
+              amount_transferred: raw.amount_transferred ? Number(raw.amount_transferred) : undefined,
+              items,
+              subtotal: Number(raw.subtotal) || 0,
+              delivery_fee: Number(raw.delivery_fee) || 0,
+              discount_total: Number(raw.discount_total) || 0,
+              total: Number(raw.total) || 0,
+              status: raw.status || 'pending',
+              created_at: raw.created_at || new Date().toISOString(),
+              shift_id: raw.shift_id || undefined,
+              is_archived: Boolean(raw.is_archived),
+            };
+
+            setOrders((prev) => {
+              if (prev.some((o) => o.id === incomingOrder.id)) return prev;
+              return [incomingOrder, ...prev];
+            });
+
+            invalidateCache('orders');
+
+            // Sound chime alert & notification toast for cashier/owner
+            playNewOrderSound();
+            showToast(
+              language === 'ar'
+                ? `🔔 طلب جديد: #${incomingOrder.order_number} من ${incomingOrder.customer_name} (${incomingOrder.total} ج.م)`
+                : `🔔 New Live Order: #${incomingOrder.order_number} from ${incomingOrder.customer_name} (${incomingOrder.total} EGP)`,
+              'info'
+            );
+
+            // If order_items were not yet inserted (written right after order), retry fetching items after 400ms
+            if (items.length === 0) {
+              setTimeout(async () => {
+                try {
+                  const { data: delayedItems } = await supabase!
+                    .from('order_items')
+                    .select('*')
+                    .eq('order_id', raw.id);
+
+                  if (delayedItems && delayedItems.length > 0) {
+                    const mappedItems: OrderItem[] = delayedItems.map((item: any) => ({
+                      product_id: item.product_id || '',
+                      product_name_en: item.product_name_en,
+                      product_name_ar: item.product_name_ar,
+                      quantity: Number(item.quantity) || 1,
+                      unit_price: Number(item.unit_price) || 0,
+                      total_price: Number(item.total_price) || 0,
+                      image: item.image || '',
+                    }));
+
+                    setOrders((prev) =>
+                      prev.map((o) =>
+                        o.id === raw.id ? { ...o, items: mappedItems } : o
+                      )
+                    );
+                    invalidateCache('orders');
+                  }
+                } catch (e) {
+                  // ignore
+                }
+              }, 400);
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            const raw = payload.new as any;
+            if (!raw || !raw.id) return;
+
+            setOrders((prev) =>
+              prev.map((o) => {
+                if (o.id === raw.id) {
+                  return {
+                    ...o,
+                    ...raw,
+                    subtotal: Number(raw.subtotal ?? o.subtotal),
+                    delivery_fee: Number(raw.delivery_fee ?? o.delivery_fee),
+                    discount_total: Number(raw.discount_total ?? o.discount_total),
+                    total: Number(raw.total ?? o.total),
+                    items: o.items, // preserve existing items unless modified
+                  };
+                }
+                return o;
+              })
+            );
+            invalidateCache('orders');
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setOrders((prev) => prev.filter((o) => o.id !== oldId));
+              invalidateCache('orders');
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'order_items' },
+        (payload) => {
+          console.info('[StoreContext] 📦 Realtime order_items event:', payload.eventType, payload);
+
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const item = payload.new as any;
+            if (!item || !item.order_id) return;
+
+            const mappedItem: OrderItem = {
+              product_id: item.product_id || '',
+              product_name_en: item.product_name_en,
+              product_name_ar: item.product_name_ar,
+              quantity: Number(item.quantity) || 1,
+              unit_price: Number(item.unit_price) || 0,
+              total_price: Number(item.total_price) || 0,
+              image: item.image || '',
+            };
+
+            setOrders((prev) =>
+              prev.map((o) => {
+                if (o.id === item.order_id) {
+                  const existingItemIndex = o.items.findIndex(
+                    (i) => i.product_id === mappedItem.product_id
+                  );
+                  let updatedItems = [...o.items];
+                  if (existingItemIndex >= 0) {
+                    updatedItems[existingItemIndex] = mappedItem;
+                  } else {
+                    updatedItems.push(mappedItem);
+                  }
+                  return { ...o, items: updatedItems };
+                }
+                return o;
+              })
+            );
+            invalidateCache('orders');
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'contact_messages' },
+        (payload) => {
+          console.info('[StoreContext] 📨 Realtime contact_messages event:', payload.eventType, payload);
+
+          if (payload.eventType === 'INSERT') {
+            const newMsg = payload.new as ContactMessage;
+            if (!newMsg || !newMsg.id) return;
+
+            setContactMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              return [newMsg, ...prev];
+            });
+            invalidateCache('contact_messages');
+
+            showToast(
+              language === 'ar'
+                ? `📨 رسالة تواصل جديدة من: ${newMsg.name}`
+                : `📨 New contact message received from: ${newMsg.name}`,
+              'info'
+            );
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as ContactMessage;
+            if (!updated || !updated.id) return;
+
+            setContactMessages((prev) =>
+              prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+            );
+            invalidateCache('contact_messages');
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setContactMessages((prev) => prev.filter((m) => m.id !== oldId));
+              invalidateCache('contact_messages');
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'newsletter_subscribers' },
+        (payload) => {
+          console.info('[StoreContext] 📬 Realtime newsletter_subscribers event:', payload.eventType, payload);
+
+          if (payload.eventType === 'INSERT') {
+            const newSub = payload.new as NewsletterSubscriber;
+            if (!newSub || !newSub.id) return;
+
+            setNewsletterSubscribers((prev) => {
+              if (prev.some((s) => s.id === newSub.id || s.email.toLowerCase() === newSub.email.toLowerCase())) {
+                return prev;
+              }
+              return [newSub, ...prev];
+            });
+            invalidateCache('newsletter_subscribers');
+
+            showToast(
+              language === 'ar'
+                ? `📬 مشترك جديد في النشرة الإخبارية: ${newSub.email}`
+                : `📬 New subscriber joined newsletter: ${newSub.email}`,
+              'info'
+            );
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as NewsletterSubscriber;
+            if (!updated || !updated.id) return;
+
+            setNewsletterSubscribers((prev) =>
+              prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
+            );
+            invalidateCache('newsletter_subscribers');
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setNewsletterSubscribers((prev) => prev.filter((s) => s.id !== oldId));
+              invalidateCache('newsletter_subscribers');
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.info('[StoreContext] 📡 Realtime sync channel status:', status);
+      });
+
+    return () => {
+      console.info('[StoreContext] Cleaning up Supabase Realtime channel...');
+      supabase.removeChannel(channel);
+    };
+  }, [language]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CONTACT_MESSAGES, JSON.stringify(contactMessages));
@@ -1015,14 +1307,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
   }, [orders]);
 
+  // Shift state: Unique shift ID per cashier session
+  const [currentShiftId, setCurrentShiftId] = useState<string>(() => {
+    const saved = localStorage.getItem('chocolate_house_active_shift_id');
+    if (saved) return saved;
+    const initialId = `shift-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    localStorage.setItem('chocolate_house_active_shift_id', initialId);
+    return initialId;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('chocolate_house_active_shift_id', currentShiftId);
+  }, [currentShiftId]);
+
   // Last shift reset timestamp (to filter Cashier daily view)
   const [lastShiftReset, setLastShiftReset] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP) || new Date(0).toISOString();
   });
 
-  // Daily orders (active non-archived orders since last shift reset)
+  // Daily orders (strictly scoped to the cashier's active shift_id)
   const dailyOrders = orders.filter((o) => {
     if (o.is_archived) return false;
+    if (o.shift_id) {
+      return o.shift_id === currentShiftId;
+    }
     return new Date(o.created_at) >= new Date(lastShiftReset);
   });
 
@@ -1070,6 +1378,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `ord-${Date.now()}`,
       order_number: orderNumber,
       status: 'pending',
+      shift_id: orderData.shift_id || currentShiftId,
       created_at: dateStr,
     };
 
@@ -1104,6 +1413,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             discount_total: newOrder.discount_total,
             total: newOrder.total,
             status: newOrder.status,
+            shift_id: newOrder.shift_id || null,
             is_archived: false,
             created_at: newOrder.created_at,
           });
@@ -1250,13 +1560,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(STORAGE_KEYS.SHIFTS, JSON.stringify(shiftReports));
   }, [shiftReports]);
 
-  const currentShiftId = `shift-${new Date().toISOString().slice(0, 10)}`;
-
-  const endShiftAndReconcile = (
+  const endShiftAndReconcile = async (
     cashierReportedCash: number,
     cashierName: string,
     notes?: string
-  ): ShiftReport => {
+  ): Promise<ShiftReport> => {
     // Calculate shift financial totals
     const shiftOrders = dailyOrders.filter((o) => o.status !== 'cancelled');
     const totalSales = shiftOrders.reduce((sum, o) => sum + o.total, 0);
@@ -1297,7 +1605,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     invalidateCache('shift_reports');
 
     if (supabase) {
-      supabase
+      const { error: repErr } = await supabase
         .from('shift_reports')
         .insert({
           id: report.id,
@@ -1316,51 +1624,161 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           discrepancy: report.discrepancy,
           notes: report.notes || null,
           created_at: report.created_at,
-        })
-        .then(({ error }) => {
-          if (error) {
-            console.error('[StoreContext] Failed to insert shift report into Supabase:', error);
-            showToast(
-              language === 'ar'
-                ? `تنبيه: تعذر حفظ تقرير الوردية بالسحابة: ${error.message}`
-                : `Warning: Could not sync shift report with database: ${error.message}`,
-              'warning'
-            );
-          }
         });
+
+      if (repErr) {
+        console.error('[StoreContext] Failed to insert shift report into Supabase:', repErr);
+        showToast(
+          language === 'ar'
+            ? `تنبيه: تعذر حفظ تقرير الوردية بالسحابة: ${repErr.message}`
+            : `Warning: Could not sync shift report with database: ${repErr.message}`,
+          'warning'
+        );
+      }
     }
 
-    // Reset cashier daily view
+    // 4A: Delete individual shift orders from Supabase permanently upon shift close,
+    // strictly scoped to this shift_id so other cashiers' concurrent shifts are NEVER touched!
+    const shiftOrdersToDelete = orders.filter(
+      (o) => !o.is_archived && (o.shift_id === currentShiftId || dailyOrders.some((d) => d.id === o.id))
+    );
+    const shiftOrderIds = shiftOrdersToDelete.map((o) => o.id);
+
+    if (shiftOrderIds.length > 0) {
+      if (supabase) {
+        try {
+          await supabase.from('order_items').delete().in('order_id', shiftOrderIds);
+        } catch (itemErr) {
+          console.warn('[StoreContext] order_items shift delete notice:', itemErr);
+        }
+
+        // Strictly delete orders in Supabase where shift_id = currentShiftId
+        const { error: delOrdersErr } = await supabase
+          .from('orders')
+          .delete()
+          .eq('shift_id', currentShiftId);
+
+        if (delOrdersErr) {
+          console.warn('[StoreContext] Failed to delete orders by shift_id, falling back to ID list:', delOrdersErr);
+          await supabase.from('orders').delete().in('id', shiftOrderIds);
+        }
+      }
+
+      // Remove only this shift's orders from local state (other cashiers' orders remain completely untouched!)
+      setOrders((prev) => prev.filter((o) => o.shift_id !== currentShiftId && !shiftOrderIds.includes(o.id)));
+      invalidateCache('orders');
+    }
+
+    // Reset cashier daily view timestamp and rotate to a brand-new unique shift_id for the next shift session
     const nowIso = new Date().toISOString();
     setLastShiftReset(nowIso);
     localStorage.setItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP, nowIso);
 
+    const nextShiftId = `shift-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    setCurrentShiftId(nextShiftId);
+    localStorage.setItem('chocolate_house_active_shift_id', nextShiftId);
+
     showToast(
       language === 'ar'
-        ? `تم إغلاق الوردية وحفظ التقرير. الفارق: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} ج.م`
-        : `Shift closed. Discrepancy: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} EGP`,
+        ? `تم إغلاق الوردية وحفظ التقرير بنجاح وحذف طلبات الوردية من قاعدة البيانات. الفارق: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} ج.م`
+        : `Shift closed & report saved. Individual orders permanently purged from database. Discrepancy: ${discrepancy >= 0 ? `+${discrepancy}` : discrepancy} EGP`,
       discrepancy === 0 ? 'success' : discrepancy > 0 ? 'info' : 'warning'
     );
 
     return report;
   };
 
-  // 8. Owner: Export & Reset Monthly Data
-  const exportAndResetMonthlyData = () => {
-    // Compute best seller
-    const productSalesMap: Record<string, { product: Product; count: number; revenue: number }> = {};
+  // 8. Owner: Export & Reset Monthly Data (Real Excel .xlsx generation & deletion)
+  const exportAndResetMonthlyData = async (): Promise<{
+    bestSeller: Product | null;
+    totalOrders: number;
+    totalSales: number;
+    filename: string;
+  }> => {
+    // 1. Determine current month bounds
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const monthStart = new Date(year, month, 1, 0, 0, 0, 0).toISOString();
+    const nextMonthStart = new Date(year, month + 1, 1, 0, 0, 0, 0).toISOString();
 
-    orders.forEach((order) => {
+    let targetOrders: Order[] = [];
+
+    // 2. Query all orders for the current month from Supabase with joined items
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select(`
+            *,
+            items:order_items(*)
+          `)
+          .gte('created_at', monthStart)
+          .lt('created_at', nextMonthStart)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.warn('[StoreContext] Supabase monthly orders query error:', error);
+        } else if (data && data.length > 0) {
+          targetOrders = data.map((o: any) => ({
+            id: o.id,
+            order_number: o.order_number,
+            order_type: o.order_type,
+            customer_name: o.customer_name,
+            customer_phone: o.customer_phone,
+            table_number: o.table_number || undefined,
+            delivery_address: o.delivery_address || undefined,
+            pickup_time: o.pickup_time || undefined,
+            notes: o.notes || undefined,
+            status: o.status,
+            payment_method: o.payment_method,
+            transfer_from_phone: o.transfer_from_phone || undefined,
+            amount_transferred: o.amount_transferred ? Number(o.amount_transferred) : undefined,
+            subtotal: Number(o.subtotal) || 0,
+            delivery_fee: Number(o.delivery_fee) || 0,
+            discount_total: Number(o.discount_total) || 0,
+            total: Number(o.total) || 0,
+            created_at: o.created_at,
+            is_archived: o.is_archived || false,
+            items: (o.items || []).map((it: any) => ({
+              product_id: it.product_id,
+              product_name_en: it.product_name_en,
+              product_name_ar: it.product_name_ar,
+              quantity: Number(it.quantity) || 1,
+              unit_price: Number(it.unit_price) || 0,
+              total_price: Number(it.total_price) || 0,
+              image: it.image || '',
+            })),
+          }));
+        }
+      } catch (queryErr) {
+        console.warn('[StoreContext] Error querying Supabase for monthly orders:', queryErr);
+      }
+    }
+
+    // Fallback: If Supabase returned no month orders or not connected, use current orders state
+    if (targetOrders.length === 0) {
+      targetOrders = orders.filter((o) => {
+        const d = new Date(o.created_at);
+        return d >= new Date(monthStart) && d < new Date(nextMonthStart);
+      });
+      // If still empty (e.g. at start of month or test orders), include all active orders
+      if (targetOrders.length === 0) {
+        targetOrders = orders.filter((o) => !o.is_archived);
+      }
+    }
+
+    // 3. Compute best seller & total sales
+    const productSalesMap: Record<string, { product?: Product; count: number; revenue: number }> = {};
+    targetOrders.forEach((order) => {
       if (order.status === 'cancelled') return;
       order.items.forEach((item) => {
         const prod = products.find((p) => p.id === item.product_id);
-        if (!productSalesMap[item.product_id] && prod) {
+        if (!productSalesMap[item.product_id]) {
           productSalesMap[item.product_id] = { product: prod, count: 0, revenue: 0 };
         }
-        if (productSalesMap[item.product_id]) {
-          productSalesMap[item.product_id].count += item.quantity;
-          productSalesMap[item.product_id].revenue += item.total_price;
-        }
+        productSalesMap[item.product_id].count += item.quantity;
+        productSalesMap[item.product_id].revenue += item.total_price;
       });
     });
 
@@ -1369,56 +1787,195 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     Object.values(productSalesMap).forEach((val) => {
       if (val.count > highestCount) {
         highestCount = val.count;
-        bestSeller = val.product;
+        if (val.product) {
+          bestSeller = val.product;
+        }
       }
     });
 
-    const activeOrders = orders.filter((o) => !o.is_archived);
-    const totalSales = activeOrders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0), 0);
+    const totalSales = targetOrders.reduce(
+      (sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0),
+      0
+    );
 
-    // Build CSV Content
-    let csvContent = 'data:text/csv;charset=utf-8,\uFEFF';
-    csvContent += '--- CHOCOLATE HOUSE MONTHLY FINANCIAL & ORDERS REPORT ---\r\n';
-    csvContent += `Generated At,${new Date().toLocaleString()}\r\n`;
-    csvContent += `Total Orders,${activeOrders.length}\r\n`;
-    csvContent += `Total Gross Revenue (EGP),${totalSales.toFixed(2)}\r\n`;
-    csvContent += `Best Seller Product,"${bestSeller ? (bestSeller as Product).name_en : 'N/A'}" (${highestCount} sold)\r\n\r\n`;
+    // 4. Generate REAL Excel (.xlsx) file with full details
+    const wb = XLSX.utils.book_new();
 
-    csvContent += 'Order #,Date,Type,Customer,Phone,Payment,Method Details,Subtotal,Delivery,Total,Status\r\n';
-    activeOrders.forEach((o) => {
-      const details = o.payment_method === 'instapay_wallet' ? `Sender: ${o.transfer_from_phone || 'N/A'}` : 'Cash';
-      csvContent += `"${o.order_number}","${o.created_at}","${o.order_type}","${o.customer_name}","${o.customer_phone}","${o.payment_method}","${details}",${o.subtotal},${o.delivery_fee},${o.total},"${o.status}"\r\n`;
+    // Sheet 1: Orders (Complete details for every single order)
+    const ordersRows = targetOrders.map((o) => {
+      const itemsFormatted = o.items
+        .map(
+          (it) =>
+            `${it.product_name_en} (Qty: ${it.quantity} @ ${it.unit_price} EGP = ${it.total_price} EGP)`
+        )
+        .join(' | ');
+
+      return {
+        'Order Number': o.order_number,
+        'Created At': new Date(o.created_at).toLocaleString('en-US', { hour12: true }),
+        'Status': o.status.toUpperCase(),
+        'Order Type': o.order_type.toUpperCase(),
+        'Customer Name': o.customer_name,
+        'Customer Phone': o.customer_phone,
+        'Table Number': o.table_number || 'N/A',
+        'Delivery Address': o.delivery_address || 'N/A',
+        'Pickup Time': o.pickup_time || 'N/A',
+        'Order Items Detail': itemsFormatted || 'None',
+        'Subtotal (EGP)': o.subtotal,
+        'Delivery Fee (EGP)': o.delivery_fee,
+        'Discount Total (EGP)': o.discount_total,
+        'Final Total (EGP)': o.total,
+        'Payment Method': o.payment_method === 'cod' ? 'Cash on Arrival' : 'InstaPay / Mobile Wallet',
+        'Transfer Phone / Sender': o.transfer_from_phone || 'N/A',
+        'Amount Transferred (EGP)': o.amount_transferred || (o.payment_method === 'instapay_wallet' ? o.total : 0),
+        'Notes': o.notes || '',
+      };
     });
 
-    csvContent += '\r\n--- SHIFT REPORTS AUDIT ---\r\n';
-    csvContent += 'Shift #,Cashier,Start,End,Orders,Total Sales,Cash Sales,Digital Sales,Expenses,Expected Cash,Reported Cash,Discrepancy\r\n';
-    shiftReports.forEach((sr) => {
-      csvContent += `"${sr.shift_number}","${sr.cashier_name}","${sr.start_time}","${sr.end_time}",${sr.total_orders_count},${sr.total_sales},${sr.cash_sales},${sr.digital_sales},${sr.expenses_total},${sr.system_expected_cash},${sr.cashier_reported_cash},${sr.discrepancy}\r\n`;
+    const wsOrders = XLSX.utils.json_to_sheet(ordersRows);
+    wsOrders['!cols'] = [
+      { wch: 16 }, // Order Number
+      { wch: 22 }, // Created At
+      { wch: 14 }, // Status
+      { wch: 14 }, // Order Type
+      { wch: 22 }, // Customer Name
+      { wch: 16 }, // Customer Phone
+      { wch: 14 }, // Table Number
+      { wch: 30 }, // Delivery Address
+      { wch: 14 }, // Pickup Time
+      { wch: 55 }, // Order Items Detail
+      { wch: 14 }, // Subtotal
+      { wch: 16 }, // Delivery Fee
+      { wch: 18 }, // Discount Total
+      { wch: 16 }, // Final Total
+      { wch: 24 }, // Payment Method
+      { wch: 22 }, // Transfer Phone / Sender
+      { wch: 24 }, // Amount Transferred
+      { wch: 30 }, // Notes
+    ];
+    XLSX.utils.book_append_sheet(wb, wsOrders, 'Orders');
+
+    // Sheet 2: Order Items (Itemized breakdown)
+    const lineItemsRows: any[] = [];
+    targetOrders.forEach((o) => {
+      o.items.forEach((it) => {
+        lineItemsRows.push({
+          'Order Number': o.order_number,
+          'Order Date': new Date(o.created_at).toLocaleDateString('en-US'),
+          'Product Name (EN)': it.product_name_en,
+          'Product Name (AR)': it.product_name_ar,
+          'Quantity': it.quantity,
+          'Unit Price (EGP)': it.unit_price,
+          'Line Total (EGP)': it.total_price,
+          'Customer Name': o.customer_name,
+          'Customer Phone': o.customer_phone,
+          'Order Status': o.status.toUpperCase(),
+        });
+      });
     });
+    const wsLineItems = XLSX.utils.json_to_sheet(lineItemsRows);
+    wsLineItems['!cols'] = [
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 28 },
+      { wch: 28 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsLineItems, 'Order Items Breakdown');
 
-    // Trigger download
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Chocolate_House_Monthly_Report_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Sheet 3: Shift Reports Audit
+    const shiftsRows = shiftReports.map((sr) => ({
+      'Shift Number': sr.shift_number,
+      'Cashier': sr.cashier_name,
+      'Start Time': new Date(sr.start_time).toLocaleString('en-US'),
+      'End Time': new Date(sr.end_time).toLocaleString('en-US'),
+      'Orders Count': sr.total_orders_count,
+      'Total Sales (EGP)': sr.total_sales,
+      'Cash Sales (EGP)': sr.cash_sales,
+      'Digital Sales (EGP)': sr.digital_sales,
+      'Expenses (EGP)': sr.expenses_total,
+      'System Expected Cash (EGP)': sr.system_expected_cash,
+      'Cashier Reported Cash (EGP)': sr.cashier_reported_cash,
+      'Discrepancy (EGP)': sr.discrepancy,
+      'Notes': sr.notes || '',
+    }));
+    const wsShifts = XLSX.utils.json_to_sheet(shiftsRows);
+    wsShifts['!cols'] = [
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 25 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsShifts, 'Shifts Audit');
 
-    // Archive active orders in database
-    setOrders((prev) => prev.map((o) => ({ ...o, is_archived: true })));
+    // 5. Trigger download of the REAL .xlsx file
+    const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const filename = `Chocolate_House_Monthly_Report_${monthStr}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    // 6. ONLY AFTER the file has successfully generated/downloaded,
+    // ONLY delete finished orders (status = 'completed' or 'cancelled').
+    // DO NOT delete 'pending' or 'preparing' orders that are still actively being worked on by a cashier!
+    const finishedOrdersToDelete = targetOrders.filter(
+      (o) => o.status === 'completed' || o.status === 'cancelled'
+    );
+    const finishedOrderIds = finishedOrdersToDelete.map((o) => o.id);
+    const activeOrdersKeptCount = targetOrders.length - finishedOrdersToDelete.length;
+
+    if (finishedOrderIds.length > 0 && supabase) {
+      try {
+        // Delete child order_items first for foreign key compliance
+        await supabase.from('order_items').delete().in('order_id', finishedOrderIds);
+      } catch (err) {
+        console.warn('[StoreContext] order_items monthly delete caught:', err);
+      }
+
+      const { error: delError } = await supabase
+        .from('orders')
+        .delete()
+        .in('id', finishedOrderIds);
+
+      if (delError) {
+        console.error('[StoreContext] Supabase delete monthly orders error:', delError);
+        showToast(
+          language === 'ar'
+            ? `تنبيه: تم تحميل ملف Excel ولكن تعذر حذف الطلبات المكتملة من السحابة: ${delError.message}`
+            : `Warning: Excel downloaded, but could not purge finished orders from database: ${delError.message}`,
+          'warning'
+        );
+      }
+    }
+
+    // Remove ONLY the finished orders from local state (keep pending & preparing intact!)
+    setOrders((prev) => prev.filter((o) => !finishedOrderIds.includes(o.id)));
+    invalidateCache('orders');
 
     showToast(
       language === 'ar'
-        ? 'تم تصدير التقرير الشهري بنجاح وأرشفة الطلبات السابقة'
-        : 'Monthly report exported & completed orders archived',
+        ? `تم تصدير ملف Excel الشامل بنجاح (${targetOrders.length} طلب) وحذف الطلبات المنتهية فقط (${finishedOrderIds.length} مكتمل/ملغي). تم الحفاظ على ${activeOrdersKeptCount} طلب نشط (قيد الانتظار/التحضير).`
+        : `Full Excel report downloaded (${targetOrders.length} orders). Purged ${finishedOrderIds.length} finished orders. Preserved ${activeOrdersKeptCount} active pending/preparing orders.`,
       'success'
     );
 
     return {
       bestSeller,
-      totalOrders: activeOrders.length,
+      totalOrders: targetOrders.length,
       totalSales,
+      filename,
     };
   };
 

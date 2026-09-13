@@ -91,6 +91,7 @@ export const OwnerDashboard: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportedSummary, setExportedSummary] = useState<any>(null);
   const [copiedEmails, setCopiedEmails] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Selected message for detail view
   const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
@@ -240,9 +241,16 @@ export const OwnerDashboard: React.FC = () => {
     }
   };
 
-  const handleExecuteExportAndReset = () => {
-    const result = exportAndResetMonthlyData();
-    setExportedSummary(result);
+  const handleExecuteExportAndReset = async () => {
+    setIsExporting(true);
+    try {
+      const result = await exportAndResetMonthlyData();
+      setExportedSummary(result);
+    } catch (err: any) {
+      console.error('[OwnerDashboard] Export error:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -1467,12 +1475,20 @@ export const OwnerDashboard: React.FC = () => {
                   </button>
                   <button
                     onClick={handleExecuteExportAndReset}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95"
+                    disabled={isExporting}
+                    className="px-5 py-2.5 rounded-xl text-xs font-black text-[#1A0A06] shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
                     style={{
                       background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
                     }}
                   >
-                    Download Excel/CSV & Archive
+                    {isExporting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1A0A06]" />
+                        <span>{language === 'ar' ? 'جارٍ توليد ملف Excel وحذف البيانات...' : 'Generating Excel & Archiving...'}</span>
+                      </>
+                    ) : (
+                      language === 'ar' ? 'تحميل ملف Excel (.xlsx) والأرشفة' : 'Download Excel (.xlsx) & Archive'
+                    )}
                   </button>
                 </div>
               </div>
@@ -1482,9 +1498,15 @@ export const OwnerDashboard: React.FC = () => {
                   <Sparkles className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-[#2B140E]">
-                  Export Complete & Data Archived!
+                  {language === 'ar' ? 'اكتمل تصدير ملف Excel بنجاح!' : 'Excel Export Complete & Data Cleared!'}
                 </h3>
                 <div className="p-3.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/30 text-xs space-y-1.5 text-left">
+                  {exportedSummary.filename && (
+                    <div className="flex justify-between font-mono text-[11px] text-gray-500 pb-1 border-b">
+                      <span>File:</span>
+                      <span className="truncate max-w-[200px]">{exportedSummary.filename}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span>Exported Orders:</span>
                     <span className="font-bold">{exportedSummary.totalOrders}</span>
