@@ -104,6 +104,7 @@ interface StoreContextType {
   // Shifts
   shiftReports: ShiftReport[];
   currentShiftId: string;
+  ensureActiveShiftReport: (shiftId?: string, cashierName?: string) => Promise<ShiftReport | null>;
   endShiftAndReconcile: (cashierReportedCash: number, cashierName: string, notes?: string) => Promise<ShiftReport>;
   
   // Monthly Export & Reset (Owner)
@@ -1175,6 +1176,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
+  const currentUserRef = useRef<UserProfile | null>(null);
+
   // 4. Cart State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -1325,6 +1328,114 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return localStorage.getItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP) || new Date(0).toISOString();
   });
 
+  // Shifts & Reconciliation state
+  const [shiftReports, setShiftReports] = useState<ShiftReport[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.SHIFTS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SHIFTS, JSON.stringify(shiftReports));
+  }, [shiftReports]);
+
+  // Set of shift IDs verified/created in Supabase in this session
+  const verifiedShiftReports = useRef<Set<string>>(new Set());
+
+  // Ensures a shift_reports row exists immediately so orders.shift_id foreign key is satisfied
+  const ensureActiveShiftReport = useCallback(
+    async (shiftId?: string, cashierName?: string): Promise<ShiftReport | null> => {
+      const targetShiftId = shiftId || currentShiftId;
+      if (!targetShiftId) return null;
+
+      const cName = cashierName || currentUserRef.current?.name || 'Cashier';
+      const nowIso = new Date().toISOString();
+      const defaultShiftNumber = `SHIFT-${nowIso.slice(5, 10).replace('-', '')}-${targetShiftId.slice(-4).toUpperCase()}`;
+
+      // 1. Check or initialize in local state
+      let existingReport = shiftReports.find((s) => s.id === targetShiftId);
+      if (!existingReport) {
+        existingReport = {
+          id: targetShiftId,
+          shift_number: defaultShiftNumber,
+          cashier_name: cName,
+          start_time: lastShiftReset || nowIso,
+          end_time: nowIso,
+          total_orders_count: 0,
+          total_sales: 0,
+          cash_sales: 0,
+          digital_sales: 0,
+          expenses_total: 0,
+          system_expected_cash: 0,
+          cashier_reported_cash: 0,
+          discrepancy: 0,
+          notes: 'active',
+          status: 'open',
+          created_at: nowIso,
+        };
+        setShiftReports((prev) => (prev.some((s) => s.id === targetShiftId) ? prev : [existingReport!, ...prev]));
+      }
+
+      // 2. Ensure record exists in Supabase so foreign key constraint orders_shift_id_fkey is satisfied
+      if (supabase && !verifiedShiftReports.current.has(targetShiftId)) {
+        try {
+          const { data: remoteRow } = await supabase
+            .from('shift_reports')
+            .select('id')
+            .eq('id', targetShiftId)
+            .maybeSingle();
+
+          if (!remoteRow) {
+            const shiftPayload = {
+              id: targetShiftId,
+              shift_number: existingReport.shift_number,
+              cashier_id: currentUserRef.current?.id || null,
+              cashier_name: cName,
+              start_time: existingReport.start_time,
+              end_time: existingReport.end_time,
+              total_orders_count: 0,
+              total_sales: 0,
+              cash_sales: 0,
+              digital_sales: 0,
+              expenses_total: 0,
+              system_expected_cash: 0,
+              cashier_reported_cash: 0,
+              discrepancy: 0,
+              notes: existingReport.notes || 'active',
+              created_at: existingReport.created_at,
+            };
+
+            const { error: insertErr } = await supabase
+              .from('shift_reports')
+              .insert(shiftPayload);
+
+            if (insertErr) {
+              if (insertErr.code !== '23505') {
+                console.warn('[StoreContext] Active shift_reports row insertion notice:', insertErr);
+              } else {
+                verifiedShiftReports.current.add(targetShiftId);
+              }
+            } else {
+              verifiedShiftReports.current.add(targetShiftId);
+              invalidateCache('shift_reports');
+            }
+          } else {
+            verifiedShiftReports.current.add(targetShiftId);
+          }
+        } catch (err) {
+          console.warn('[StoreContext] ensureActiveShiftReport error:', err);
+        }
+      }
+
+      return existingReport;
+    },
+    [currentShiftId, lastShiftReset, shiftReports]
+  );
+
   // Daily orders (strictly scoped to the cashier's active shift_id)
   const dailyOrders = orders.filter((o) => {
     if (o.is_archived) return false;
@@ -1394,8 +1505,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (supabase) {
       (async () => {
         try {
-          // 1. Insert order record
-          await supabase.from('orders').insert({
+          // Ensure active shift report exists in shift_reports before inserting the order
+          if (newOrder.shift_id) {
+            await ensureActiveShiftReport(newOrder.shift_id, currentUserRef.current?.name);
+          }
+
+          const orderPayload = {
             id: newOrder.id,
             order_number: newOrder.order_number,
             order_type: newOrder.order_type,
@@ -1416,7 +1531,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             shift_id: newOrder.shift_id || null,
             is_archived: false,
             created_at: newOrder.created_at,
-          });
+          };
+
+          // 1. Insert order record
+          let { error: orderErr } = await supabase.from('orders').insert(orderPayload);
+
+          // Foreign key fallback: If 23503 error occurs, retry insert with shift_id: null
+          if (orderErr) {
+            if (orderErr.code === '23503' || orderErr.message?.includes('orders_shift_id_fkey')) {
+              console.warn('[StoreContext] Foreign key 23503 caught. Retrying order insert with shift_id: null');
+              const retryRes = await supabase.from('orders').insert({
+                ...orderPayload,
+                shift_id: null,
+              });
+              orderErr = retryRes.error;
+            }
+            if (orderErr) {
+              console.error('[StoreContext] Failed to insert order into Supabase:', orderErr);
+            }
+          }
 
           // 2. Insert order items
           const itemsPayload = newOrder.items.map((item, idx) => ({
@@ -1546,20 +1679,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // 7. Shifts & Reconciliation
-  const [shiftReports, setShiftReports] = useState<ShiftReport[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SHIFTS);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SHIFTS, JSON.stringify(shiftReports));
-  }, [shiftReports]);
-
   const endShiftAndReconcile = async (
     cashierReportedCash: number,
     cashierName: string,
@@ -1583,12 +1702,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const systemExpectedCash = Math.max(0, cashSales - expensesTotal);
     const discrepancy = cashierReportedCash - systemExpectedCash;
 
+    // Use the existing active shift report row for currentShiftId
+    const existingShift = shiftReports.find((s) => s.id === currentShiftId);
+    const nowIso = new Date().toISOString();
+
     const report: ShiftReport = {
-      id: `rep-${Date.now()}`,
-      shift_number: `SHIFT-${new Date().toISOString().slice(5, 10).replace('-', '')}-${Math.floor(100 + Math.random() * 900)}`,
+      id: currentShiftId,
+      shift_number: existingShift?.shift_number || `SHIFT-${nowIso.slice(5, 10).replace('-', '')}-${currentShiftId.slice(-4).toUpperCase()}`,
       cashier_name: cashierName,
-      start_time: lastShiftReset,
-      end_time: new Date().toISOString(),
+      start_time: existingShift?.start_time || lastShiftReset,
+      end_time: nowIso,
       total_orders_count: shiftOrders.length,
       total_sales: totalSales,
       cash_sales: cashSales,
@@ -1597,43 +1720,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       system_expected_cash: systemExpectedCash,
       cashier_reported_cash: cashierReportedCash,
       discrepancy,
-      notes,
-      created_at: new Date().toISOString(),
+      notes: notes || (existingShift?.notes !== 'active' ? existingShift?.notes : undefined),
+      status: 'closed',
+      created_at: existingShift?.created_at || nowIso,
     };
 
-    setShiftReports((prev) => [report, ...prev]);
+    // Update in local state
+    setShiftReports((prev) => {
+      const exists = prev.some((s) => s.id === currentShiftId);
+      if (exists) {
+        return prev.map((s) => (s.id === currentShiftId ? report : s));
+      }
+      return [report, ...prev];
+    });
     invalidateCache('shift_reports');
 
+    // UPDATE that same shift_reports row in Supabase (not insert a new one)
     if (supabase) {
-      const { error: repErr } = await supabase
+      const updatePayload = {
+        shift_number: report.shift_number,
+        cashier_id: currentUserRef.current?.id || null,
+        cashier_name: report.cashier_name,
+        start_time: report.start_time,
+        end_time: report.end_time,
+        total_orders_count: report.total_orders_count,
+        total_sales: report.total_sales,
+        cash_sales: report.cash_sales,
+        digital_sales: report.digital_sales,
+        expenses_total: report.expenses_total,
+        system_expected_cash: report.system_expected_cash,
+        cashier_reported_cash: report.cashier_reported_cash,
+        discrepancy: report.discrepancy,
+        notes: report.notes || null,
+      };
+
+      const { data: updatedRows, error: repErr } = await supabase
         .from('shift_reports')
-        .insert({
-          id: report.id,
-          shift_number: report.shift_number,
-          cashier_id: currentUser?.id || null,
-          cashier_name: report.cashier_name,
-          start_time: report.start_time,
-          end_time: report.end_time,
-          total_orders_count: report.total_orders_count,
-          total_sales: report.total_sales,
-          cash_sales: report.cash_sales,
-          digital_sales: report.digital_sales,
-          expenses_total: report.expenses_total,
-          system_expected_cash: report.system_expected_cash,
-          cashier_reported_cash: report.cashier_reported_cash,
-          discrepancy: report.discrepancy,
-          notes: report.notes || null,
+        .update(updatePayload)
+        .eq('id', currentShiftId)
+        .select();
+
+      if (repErr || !updatedRows || updatedRows.length === 0) {
+        console.warn('[StoreContext] Update shift report fallback, executing upsert:', repErr);
+        await supabase.from('shift_reports').upsert({
+          id: currentShiftId,
+          ...updatePayload,
           created_at: report.created_at,
         });
-
-      if (repErr) {
-        console.error('[StoreContext] Failed to insert shift report into Supabase:', repErr);
-        showToast(
-          language === 'ar'
-            ? `تنبيه: تعذر حفظ تقرير الوردية بالسحابة: ${repErr.message}`
-            : `Warning: Could not sync shift report with database: ${repErr.message}`,
-          'warning'
-        );
       }
     }
 
@@ -1670,13 +1803,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     // Reset cashier daily view timestamp and rotate to a brand-new unique shift_id for the next shift session
-    const nowIso = new Date().toISOString();
     setLastShiftReset(nowIso);
     localStorage.setItem(STORAGE_KEYS.SHIFT_RESET_TIMESTAMP, nowIso);
 
     const nextShiftId = `shift-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     setCurrentShiftId(nextShiftId);
     localStorage.setItem('chocolate_house_active_shift_id', nextShiftId);
+
+    // Immediately create the shift_reports row for the next shift in advance
+    ensureActiveShiftReport(nextShiftId, cashierName);
 
     showToast(
       language === 'ar'
@@ -1982,6 +2117,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 9. Auth State & Real Supabase Session Management
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(Boolean(supabase));
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+    if (currentUser && currentShiftId) {
+      ensureActiveShiftReport(currentShiftId, currentUser.name);
+    }
+  }, [currentUser, currentShiftId, ensureActiveShiftReport]);
 
   // Helper to map Supabase User to UserProfile strictly reading public.profiles
   const resolveUserProfile = async (user: any): Promise<UserProfile | null> => {
@@ -2293,6 +2435,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addExpense,
         shiftReports,
         currentShiftId,
+        ensureActiveShiftReport,
         endShiftAndReconcile,
         exportAndResetMonthlyData,
         currentUser,

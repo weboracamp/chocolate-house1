@@ -114,6 +114,7 @@ export interface ShiftReport {
   cashier_reported_cash: number;
   discrepancy: number; // positive = over, negative = short, 0 = balanced
   notes?: string;
+  status?: 'open' | 'closed';
   created_at: string;
 }
 

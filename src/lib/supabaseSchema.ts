@@ -238,7 +238,11 @@ CREATE POLICY "Staff can manage expenses" ON public.expenses
 -- Shift Reports Policies
 DROP POLICY IF EXISTS "Staff can manage shift reports" ON public.shift_reports;
 CREATE POLICY "Staff can manage shift reports" ON public.shift_reports
-  FOR ALL USING (true);
+  FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Anyone can insert shift reports" ON public.shift_reports;
+CREATE POLICY "Anyone can insert shift reports" ON public.shift_reports
+  FOR INSERT WITH CHECK (true);
 
 -- Contact Messages Policies
 DROP POLICY IF EXISTS "Public can submit contact messages" ON public.contact_messages;

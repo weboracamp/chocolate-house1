@@ -54,7 +54,15 @@ export const CashierDashboard: React.FC = () => {
     logout,
     setActiveView,
     showToast,
+    currentShiftId,
+    ensureActiveShiftReport,
   } = useStore();
+
+  React.useEffect(() => {
+    if (currentUser) {
+      ensureActiveShiftReport(currentShiftId, currentUser.name);
+    }
+  }, [currentShiftId, currentUser, ensureActiveShiftReport]);
 
   // 1. Strict Role & Auth Guard
   if (isAuthLoading) {
