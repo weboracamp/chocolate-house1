@@ -4,6 +4,7 @@ import { Logo } from './Logo';
 import { Product, CategoryType, OrderStatus } from '../types';
 import { EXACT_CATEGORIES } from './CategoryFilter';
 import { SUPABASE_SQL_SCHEMA } from '../lib/supabaseSchema';
+import { supabase } from '../lib/supabase';
 import {
   TrendingUp,
   CreditCard,
@@ -38,6 +39,11 @@ import {
   UserPlus,
   CheckCircle2,
   Globe,
+  UploadCloud,
+  Image as ImageIcon,
+  Camera,
+  X,
+  Link2,
 } from 'lucide-react';
 
 export const OwnerDashboard: React.FC = () => {
@@ -101,6 +107,12 @@ export const OwnerDashboard: React.FC = () => {
   const [formStock, setFormStock] = useState('');
   const [formImage, setFormImage] = useState('');
   const [formIsBestSeller, setFormIsBestSeller] = useState(false);
+
+  // Direct Product Image Upload State (Supabase Storage)
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   // Export Monthly Orders Modal Confirmation
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -209,8 +221,11 @@ export const OwnerDashboard: React.FC = () => {
     setFormDiscountPrice('');
     setFormCategory('Molten Cake');
     setFormStock('20');
-    setFormImage('https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80');
+    setFormImage('');
     setFormIsBestSeller(false);
+    setUploadError(null);
+    setShowUrlInput(false);
+    setIsUploadingImage(false);
     setIsProductModalOpen(true);
   };
 
@@ -226,7 +241,101 @@ export const OwnerDashboard: React.FC = () => {
     setFormStock(p.stock.toString());
     setFormImage(p.image);
     setFormIsBestSeller(Boolean(p.is_best_seller));
+    setUploadError(null);
+    setShowUrlInput(false);
+    setIsUploadingImage(false);
     setIsProductModalOpen(true);
+  };
+
+  const handleProductImageUpload = async (file: File) => {
+    setUploadError(null);
+
+    // 1. Validation: Image file types only
+    if (!file.type.startsWith('image/')) {
+      setUploadError(
+        language === 'ar'
+          ? 'يرجى اختيار ملف صورة صالح (JPEG, PNG, WEBP, GIF).'
+          : 'Please select a valid image file (JPEG, PNG, WEBP, GIF).'
+      );
+      return;
+    }
+
+    // 2. Validation: Max size 5MB
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      setUploadError(
+        language === 'ar'
+          ? 'حجم الصورة يتجاوز الحد الأقصى المسموح (5 ميجابايت). يرجى اختيار صورة أصغر.'
+          : 'Image size exceeds the maximum limit (5MB). Please choose a smaller image.'
+      );
+      return;
+    }
+
+    // 3. Immediate local preview thumbnail
+    const localPreviewUrl = URL.createObjectURL(file);
+    setFormImage(localPreviewUrl);
+
+    // 4. Send file directly to Supabase Storage bucket 'product-images'
+    if (!supabase) {
+      setUploadError(
+        language === 'ar'
+          ? 'خدمة Supabase غير متصلة حالياً. يمكنك استخدام خيار إدخال رابط خارجي كبديل.'
+          : 'Supabase client is not connected. You can paste an external image URL as a fallback.'
+      );
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const BUCKET_NAME = 'product-images';
+
+      // Auto-create bucket if missing
+      try {
+        await supabase.storage.createBucket(BUCKET_NAME, { public: true });
+      } catch {
+        // Bucket may already exist or managed via SQL
+      }
+
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const cleanFileName = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+      const filePath = `products/${cleanFileName}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type,
+        });
+
+      if (uploadErr) {
+        console.error('Supabase image upload error:', uploadErr);
+        setUploadError(
+          language === 'ar'
+            ? `فشل رفع الصورة إلى Supabase: ${uploadErr.message || 'خطأ غير متوقع'}. يمكنك تجربة صورة أخرى أو استخدام خيار الرابط البديل.`
+            : `Image upload to Supabase failed: ${uploadErr.message || 'Unexpected error'}. You can try another image or use the URL fallback.`
+        );
+        return;
+      }
+
+      // 5. Get and store public URL in product's image field
+      const { data: publicUrlData } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(filePath);
+
+      if (publicUrlData?.publicUrl) {
+        setFormImage(publicUrlData.publicUrl);
+      }
+    } catch (err: any) {
+      console.error('Exception during product image upload:', err);
+      setUploadError(
+        language === 'ar'
+          ? `حدث خطأ أثناء رفع الصورة: ${err?.message || 'يرجى المحاولة مرة أخرى'}`
+          : `An error occurred while uploading image: ${err?.message || 'Please try again'}`
+      );
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const [isSavingProduct, setIsSavingProduct] = useState(false);
@@ -1704,17 +1813,184 @@ export const OwnerDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-[#2B140E] block mb-1">
-                  Image URL
-                </label>
-                <input
-                  type="url"
-                  value={formImage}
-                  onChange={(e) => setFormImage(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs focus:border-[#D4AF37] focus:outline-hidden"
-                />
+              {/* PRODUCT IMAGE: DIRECT DEVICE UPLOAD & SUPABASE STORAGE */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-[#2B140E] flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-[#8C6212]" />
+                    <span>{language === 'ar' ? 'صورة المنتج' : 'Product Image'}</span>
+                  </label>
+
+                  {/* Fallback URL toggle button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowUrlInput(!showUrlInput)}
+                    className="text-[11px] font-bold text-[#8C6212] hover:text-[#2B140E] flex items-center gap-1 transition-colors underline decoration-[#D4AF37]/50"
+                  >
+                    <Link2 className="w-3 h-3" />
+                    <span>
+                      {showUrlInput
+                        ? (language === 'ar' ? 'إخفاء رابط الصورة' : 'Hide image URL')
+                        : (language === 'ar' ? 'أو أدخل رابطاً مباشراً (URL)' : 'Or paste image URL')}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Direct Upload Control Area */}
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingFile(true);
+                  }}
+                  onDragLeave={() => setIsDraggingFile(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingFile(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleProductImageUpload(file);
+                  }}
+                  className={`border-2 border-dashed rounded-2xl p-3.5 sm:p-4 transition-all ${
+                    isDraggingFile
+                      ? 'border-[#D4AF37] bg-[#FFF9E6]'
+                      : 'border-[#D4AF37]/40 bg-[#FFFDF9] hover:bg-[#FFF9EE]'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    {/* Thumbnail Preview */}
+                    {formImage ? (
+                      <div className="relative group shrink-0">
+                        <img
+                          src={formImage}
+                          alt="Product preview"
+                          referrerPolicy="no-referrer"
+                          className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl object-cover border-2 border-[#D4AF37]/40 shadow-xs bg-amber-50"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80';
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setFormImage('')}
+                          title={language === 'ar' ? 'إزالة الصورة' : 'Remove image'}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md hover:bg-rose-700 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl border-2 border-dashed border-[#D4AF37]/30 bg-amber-50/50 flex flex-col items-center justify-center text-gray-400 shrink-0">
+                        <ImageIcon className="w-6 h-6 text-[#D4AF37]/60 mb-1" />
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          {language === 'ar' ? 'لا توجد صورة' : 'No image'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Upload actions & instructions */}
+                    <div className="flex-1 text-center sm:text-start space-y-1.5 w-full">
+                      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        {/* Native File Input button (works on Mobile camera/gallery & Desktop picker) */}
+                        <label
+                          htmlFor="product-image-device-input"
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer ${
+                            isUploadingImage
+                              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              : 'bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] hover:scale-[1.02] active:scale-95'
+                          }`}
+                        >
+                          {isUploadingImage ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F7E7A9]" />
+                              <span>{language === 'ar' ? 'جارٍ رفع الصورة...' : 'Uploading...'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <UploadCloud className="w-3.5 h-3.5 text-[#D4AF37]" />
+                              <span>{language === 'ar' ? 'اختيار صورة من الجهاز' : 'Choose from Device'}</span>
+                            </>
+                          )}
+                          <input
+                            id="product-image-device-input"
+                            type="file"
+                            accept="image/*"
+                            disabled={isUploadingImage}
+                            className="sr-only"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleProductImageUpload(file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+
+                        {formImage && !isUploadingImage && (
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>{language === 'ar' ? 'جاهزة للحفظ' : 'Ready to save'}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-gray-500">
+                        {language === 'ar'
+                          ? 'الصور المدعومة: JPG, PNG, WEBP (بحد أقصى 5 ميجابايت). يمكنك التقاط صورة بالكاميرا أو اختيارها من المعرض.'
+                          : 'Supported formats: JPG, PNG, WEBP (Max 5MB). Mobile camera & gallery supported.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Upload Progress Bar */}
+                  {isUploadingImage && (
+                    <div className="mt-3 pt-2 border-t border-[#D4AF37]/20 space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold text-[#8C6212]">
+                        <span>{language === 'ar' ? 'جارٍ إرسال الصورة إلى Supabase Storage...' : 'Sending image to Supabase Storage...'}</span>
+                        <span>{language === 'ar' ? 'يرجى الانتظار' : 'Please wait'}</span>
+                      </div>
+                      <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-[#D4AF37] h-full rounded-full animate-pulse w-3/4" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload Error Banner */}
+                  {uploadError && (
+                    <div className="mt-2.5 p-2 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-700">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-semibold">{uploadError}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setUploadError(null)}
+                        className="text-rose-500 hover:text-rose-800"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Fallback External URL Input (collapsible or toggled) */}
+                {showUrlInput && (
+                  <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-1">
+                    <label className="text-[11px] font-bold text-gray-700 block">
+                      {language === 'ar' ? 'رابط الصورة الخارجي (Fallback URL):' : 'External Image URL (Fallback):'}
+                    </label>
+                    <input
+                      type="url"
+                      value={formImage}
+                      onChange={(e) => setFormImage(e.target.value)}
+                      placeholder="https://images.unsplash.com/... or https://i.postimg.cc/..."
+                      className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-mono focus:border-[#D4AF37] focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-gray-500">
+                      {language === 'ar'
+                        ? 'يمكنك لصق رابط صورة مباشر في حال تعذر الرفع المباشر.'
+                        : 'You can paste a direct image URL if direct upload is not preferred.'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1766,10 +2042,15 @@ export const OwnerDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingProduct}
+                  disabled={isSavingProduct || isUploadingImage}
                   className="px-5 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  {isSavingProduct ? (
+                  {isUploadingImage ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F7E7A9]" />
+                      <span>{language === 'ar' ? 'جارٍ رفع الصورة...' : 'Uploading image...'}</span>
+                    </>
+                  ) : isSavingProduct ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F7E7A9]" />
                       <span>{language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...'}</span>

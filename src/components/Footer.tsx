@@ -260,9 +260,30 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Minimalist Centered Bottom Bar */}
-        <div className="border-t border-[#D4AF37]/15 pt-6 text-center">
+        <div className="border-t border-[#D4AF37]/15 pt-6 text-center space-y-2">
           <p className="text-xs text-[#F7E7A9]/70 tracking-wide font-normal">
             © 2026 Chocolate House - شوكلت هاوس. All rights reserved.
+          </p>
+
+          <p className="text-xs text-[#FFF5E1]/80 tracking-wide font-medium flex items-center justify-center flex-wrap gap-x-1.5 gap-y-1">
+            <span>{language === 'ar' ? 'تم التطوير بواسطة' : 'Developed by'}:</span>
+            <a
+              href="https://www.facebook.com/youssefmostafa1698"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center text-[#F7E7A9] hover:text-[#D4AF37] font-semibold underline decoration-[#D4AF37]/50 underline-offset-4 hover:decoration-[#D4AF37] transition-all px-1 py-0.5 rounded-sm hover:bg-white/5 active:scale-95"
+            >
+              يوسف مصطفى
+            </a>
+            <span className="text-[#D4AF37]/60">&</span>
+            <a
+              href="https://www.facebook.com/omar.sayedabdelaziz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center text-[#F7E7A9] hover:text-[#D4AF37] font-semibold underline decoration-[#D4AF37]/50 underline-offset-4 hover:decoration-[#D4AF37] transition-all px-1 py-0.5 rounded-sm hover:bg-white/5 active:scale-95"
+            >
+              عمر سيد
+            </a>
           </p>
         </div>
       </div>

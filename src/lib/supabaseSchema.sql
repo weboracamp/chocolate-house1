@@ -353,3 +353,24 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS staff_name TEXT;
 ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS selected_addons JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS addon_total NUMERIC(10, 2) DEFAULT 0;
 
+-- 4. Storage Bucket for Product Images
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public can view product images" ON storage.objects;
+CREATE POLICY "Public can view product images" ON storage.objects
+  FOR SELECT USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Staff can upload product images" ON storage.objects;
+CREATE POLICY "Staff can upload product images" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Staff can update product images" ON storage.objects;
+CREATE POLICY "Staff can update product images" ON storage.objects
+  FOR UPDATE USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Staff can delete product images" ON storage.objects;
+CREATE POLICY "Staff can delete product images" ON storage.objects
+  FOR DELETE USING (bucket_id = 'product-images');
+

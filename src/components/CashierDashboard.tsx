@@ -388,7 +388,7 @@ export const CashierDashboard: React.FC = () => {
       category: expCategory,
       amount,
       notes: expNotes.trim() || undefined,
-      cashier_name: currentUser?.name || 'Cashier',
+      cashier_name: activeStaffName.trim() || currentUser?.name || 'Cashier',
     });
 
     setExpTitle('');
@@ -402,11 +402,13 @@ export const CashierDashboard: React.FC = () => {
     const physicalAmount = parseFloat(physicalCashInput);
     if (isNaN(physicalAmount) || physicalAmount < 0) return;
 
+    const staffToAttribute = closingStaffName.trim() || activeStaffName.trim() || currentUser?.name || 'Cashier';
+
     setIsEndingShift(true);
     try {
       const report = await endShiftAndReconcile(
         physicalAmount,
-        currentUser?.name || 'Cashier',
+        staffToAttribute,
         shiftNotes.trim() || undefined
       );
       setShiftCompletedReport(report);
