@@ -125,10 +125,18 @@ export const ReceiptModal: React.FC = () => {
               <span className="font-semibold">{t.customerName}:</span>
               <span>{order.customer_name}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="font-semibold">{t.customerPhone}:</span>
-              <span>{order.customer_phone}</span>
-            </div>
+            {order.customer_phone && (
+              <div className="flex justify-between">
+                <span className="font-semibold">{t.customerPhone}:</span>
+                <span>{order.customer_phone}</span>
+              </div>
+            )}
+            {order.staff_name && (
+              <div className="flex justify-between text-[#2B140E]">
+                <span className="font-semibold">{language === 'ar' ? 'الكاشير المسؤول:' : 'Cashier / Staff:'}</span>
+                <span className="font-bold">{order.staff_name}</span>
+              </div>
+            )}
             {order.table_number && (
               <div className="flex justify-between">
                 <span className="font-semibold">{t.tableNumber}:</span>
@@ -157,18 +165,34 @@ export const ReceiptModal: React.FC = () => {
             </div>
 
             {order.items.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-start text-xs">
-                <div className="flex-1 pr-2">
-                  <span className="font-bold block">
-                    {language === 'ar' ? item.product_name_ar : item.product_name_en}
-                  </span>
-                  <span className="text-[10px] text-gray-500">
-                    {item.quantity} × {item.unit_price} EGP
+              <div key={idx} className="space-y-0.5 border-b border-gray-100 last:border-0 pb-1.5 pt-1">
+                <div className="flex justify-between items-start text-xs">
+                  <div className="flex-1 pr-2">
+                    <span className="font-bold block">
+                      {language === 'ar' ? item.product_name_ar : item.product_name_en}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      {item.quantity} × {item.unit_price} EGP
+                    </span>
+                  </div>
+                  <span className="font-bold text-right shrink-0">
+                    {item.total_price} EGP
                   </span>
                 </div>
-                <span className="font-bold text-right shrink-0">
-                  {item.total_price} EGP
-                </span>
+
+                {/* Add-ons list on receipt */}
+                {item.selected_addons && item.selected_addons.length > 0 && (
+                  <div className="text-[10px] text-gray-600 pl-2 space-y-0.5 font-mono">
+                    {item.selected_addons.map((addon, aIdx) => (
+                      <div key={aIdx} className="flex justify-between">
+                        <span>
+                          ↳ {language === 'ar' ? addon.name_ar : addon.name_en}
+                        </span>
+                        {addon.price > 0 && <span>+{addon.price} EGP</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

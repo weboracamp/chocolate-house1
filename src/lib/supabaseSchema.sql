@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   total NUMERIC(10, 2) NOT NULL,
   status order_status_enum NOT NULL DEFAULT 'pending',
   shift_id TEXT REFERENCES public.shift_reports(id) ON DELETE SET NULL,
+  staff_name TEXT,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -115,7 +116,9 @@ CREATE TABLE IF NOT EXISTS public.order_items (
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price NUMERIC(10, 2) NOT NULL,
   total_price NUMERIC(10, 2) NOT NULL,
-  image TEXT
+  image TEXT,
+  selected_addons JSONB DEFAULT '[]'::jsonb,
+  addon_total NUMERIC(10, 2) DEFAULT 0
 );
 
 -- 7. Expenses Table (Cashier Out-of-Pocket / Store Expenses)
@@ -149,6 +152,23 @@ CREATE TABLE IF NOT EXISTS public.newsletter_subscribers (
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- 10. Cashier Staff Members Table (Named Staff Attribution)
+CREATE TABLE IF NOT EXISTS public.cashier_staff (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Seed initial cashier staff
+INSERT INTO public.cashier_staff (id, name, is_active)
+VALUES 
+  ('staff-1', 'Ahmed', true),
+  ('staff-2', 'Sara', true),
+  ('staff-3', 'Omar', true),
+  ('staff-4', 'Youssef', true)
+ON CONFLICT (id) DO NOTHING;
 
 -- ==============================================================================
 -- AUTOMATIC STOCK DECREMENT TRIGGER
@@ -257,6 +277,17 @@ DROP POLICY IF EXISTS "Staff can manage newsletter subscribers" ON public.newsle
 CREATE POLICY "Staff can manage newsletter subscribers" ON public.newsletter_subscribers
   FOR ALL USING (true);
 
+-- Cashier Staff Policies
+ALTER TABLE public.cashier_staff ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Cashier staff are readable" ON public.cashier_staff;
+CREATE POLICY "Cashier staff are readable" ON public.cashier_staff
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Cashier staff are manageable" ON public.cashier_staff;
+DROP POLICY IF EXISTS "Authenticated can manage cashier staff" ON public.cashier_staff;
+CREATE POLICY "Authenticated can manage cashier staff" ON public.cashier_staff
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- ==============================================================================
 -- SUPABASE REALTIME PUBLICATION
 -- Stock updates (via the order_items trigger) and other live tables
@@ -267,12 +298,13 @@ ALTER TABLE public.order_items REPLICA IDENTITY FULL;
 ALTER TABLE public.contact_messages REPLICA IDENTITY FULL;
 ALTER TABLE public.newsletter_subscribers REPLICA IDENTITY FULL;
 ALTER TABLE public.shift_reports REPLICA IDENTITY FULL;
+ALTER TABLE public.cashier_staff REPLICA IDENTITY FULL;
 
 DO $$
 DECLARE
   t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['products', 'orders', 'order_items', 'contact_messages', 'newsletter_subscribers', 'shift_reports']
+  FOREACH t IN ARRAY ARRAY['products', 'orders', 'order_items', 'contact_messages', 'newsletter_subscribers', 'shift_reports', 'cashier_staff']
   LOOP
     IF NOT EXISTS (
       SELECT 1
@@ -285,3 +317,39 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ==============================================================================
+-- DELTA MIGRATION SCRIPT (For existing databases)
+-- Run this block if you already have the initial Chocolate House schema deployed:
+-- ==============================================================================
+-- 1. Cashier Staff Table
+CREATE TABLE IF NOT EXISTS public.cashier_staff (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+INSERT INTO public.cashier_staff (id, name, is_active)
+VALUES 
+  ('staff-1', 'Ahmed', true),
+  ('staff-2', 'Sara', true),
+  ('staff-3', 'Omar', true),
+  ('staff-4', 'Youssef', true)
+ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.cashier_staff ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Cashier staff are readable" ON public.cashier_staff;
+CREATE POLICY "Cashier staff are readable" ON public.cashier_staff FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Cashier staff are manageable" ON public.cashier_staff;
+DROP POLICY IF EXISTS "Authenticated can manage cashier staff" ON public.cashier_staff;
+CREATE POLICY "Authenticated can manage cashier staff" ON public.cashier_staff 
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- 2. Staff name attribution on orders
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS staff_name TEXT;
+
+-- 3. Customer Add-ons on order items
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS selected_addons JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS addon_total NUMERIC(10, 2) DEFAULT 0;
+

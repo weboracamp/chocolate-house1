@@ -54,6 +54,21 @@ export type PaymentMethod = 'cod' | 'instapay_wallet';
 
 export type OrderStatus = 'pending' | 'preparing' | 'completed' | 'cancelled';
 
+export interface SelectedAddon {
+  id: string;
+  name: string;
+  name_en: string;
+  name_ar: string;
+  price: number;
+  category: 'size' | 'flavor' | 'topping';
+}
+
+export interface CashierStaff {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
 export interface OrderItem {
   product_id: string;
   product_name_en: string;
@@ -62,6 +77,8 @@ export interface OrderItem {
   unit_price: number;
   total_price: number;
   image?: string;
+  selected_addons?: SelectedAddon[];
+  addon_total?: number;
 }
 
 export interface Order {
@@ -70,6 +87,7 @@ export interface Order {
   order_type: OrderType;
   customer_name: string;
   customer_phone: string;
+  staff_name?: string;
   table_number?: string;
   delivery_address?: string;
   pickup_time?: string;

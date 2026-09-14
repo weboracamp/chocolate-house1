@@ -110,7 +110,7 @@ export const CartDrawer: React.FC = () => {
           ) : (
             cart.map((item) => (
               <div
-                key={item.product_id}
+                key={item.cart_item_id || item.product_id}
                 className="flex items-center gap-3 p-3 rounded-xl bg-white border border-[#D4AF37]/20 shadow-xs"
               >
                 {/* Image */}
@@ -128,7 +128,27 @@ export const CartDrawer: React.FC = () => {
                   <h4 className="text-sm font-bold text-[#2B140E] truncate">
                     {language === 'ar' ? item.product_name_ar : item.product_name_en}
                   </h4>
-                  <div className="flex items-baseline gap-1 mt-0.5">
+
+                  {/* Add-ons & Size Tags */}
+                  {item.selected_addons && item.selected_addons.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {item.selected_addons.map((addon) => (
+                        <span
+                          key={addon.id}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium leading-tight ${
+                            addon.category === 'size'
+                              ? 'bg-[#2B140E] text-[#F7E7A9]'
+                              : 'bg-amber-50 text-[#8C6212] border border-[#D4AF37]/30'
+                          }`}
+                        >
+                          {language === 'ar' ? addon.name_ar : addon.name_en}
+                          {addon.price > 0 ? ` (+${addon.price})` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-baseline gap-1 mt-1">
                     <span className="text-xs font-bold text-[#D4AF37]">
                       {item.unit_price} {t.priceCurrency}
                     </span>
@@ -139,7 +159,7 @@ export const CartDrawer: React.FC = () => {
                   <div className="flex items-center gap-2 mt-2">
                     <div className="flex items-center border border-[#D4AF37]/30 rounded-md bg-[#FFFBF5]">
                       <button
-                        onClick={() => updateCartQuantity(item.product_id, item.quantity - 1)}
+                        onClick={() => updateCartQuantity(item.cart_item_id || item.product_id, item.quantity - 1)}
                         className="p-1 hover:bg-[#D4AF37]/20 text-[#2B140E]"
                         aria-label="Decrease"
                       >
@@ -149,7 +169,7 @@ export const CartDrawer: React.FC = () => {
                         {item.quantity}
                       </span>
                       <button
-                        onClick={() => updateCartQuantity(item.product_id, item.quantity + 1)}
+                        onClick={() => updateCartQuantity(item.cart_item_id || item.product_id, item.quantity + 1)}
                         className="p-1 hover:bg-[#D4AF37]/20 text-[#2B140E]"
                         aria-label="Increase"
                       >
@@ -158,7 +178,7 @@ export const CartDrawer: React.FC = () => {
                     </div>
 
                     <button
-                      onClick={() => removeFromCart(item.product_id)}
+                      onClick={() => removeFromCart(item.cart_item_id || item.product_id)}
                       className="text-xs text-red-500 hover:text-red-700 p-1"
                       title="Remove item"
                     >

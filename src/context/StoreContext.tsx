@@ -18,6 +18,8 @@ import {
   ContactInquiry,
   ContactMessage,
   NewsletterSubscriber,
+  CashierStaff,
+  SelectedAddon,
 } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { INITIAL_FEATURES } from '../data/features';
@@ -41,7 +43,8 @@ interface Toast {
   message: string;
 }
 
-interface CartItem extends OrderItem {
+export interface CartItem extends OrderItem {
+  cart_item_id: string;
   stock: number;
 }
 
@@ -79,15 +82,21 @@ interface StoreContextType {
   
   // Cart
   cart: CartItem[];
-  addToCart: (product: Product, quantity?: number) => boolean;
-  removeFromCart: (productId: string) => void;
-  updateCartQuantity: (productId: string, quantity: number) => void;
+  addToCart: (product: Product, quantity?: number, selectedAddons?: SelectedAddon[]) => boolean;
+  removeFromCart: (cartItemIdOrProdId: string) => void;
+  updateCartQuantity: (cartItemIdOrProdId: string, quantity: number) => void;
   clearCart: () => void;
   cartCount: number;
   cartSubtotal: number;
   cartDiscount: number;
   cartTotal: number;
   
+  // Staff Attribution
+  cashierStaffList: CashierStaff[];
+  addCashierStaff: (name: string) => Promise<boolean>;
+  removeCashierStaff: (id: string) => Promise<boolean>;
+  toggleCashierStaff: (id: string, is_active: boolean) => Promise<boolean>;
+
   // Orders
   orders: Order[];
   dailyOrders: Order[];
@@ -143,6 +152,7 @@ const STORAGE_KEYS = {
   SHIFT_RESET_TIMESTAMP: 'ch_last_shift_reset',
   CONTACT_MESSAGES: 'ch_contact_messages',
   NEWSLETTER_SUBSCRIBERS: 'ch_newsletter_subscribers',
+  CASHIER_STAFF: 'ch_cashier_staff',
 };
 
 const REALTIME_TABLES = [
@@ -152,6 +162,7 @@ const REALTIME_TABLES = [
   'contact_messages',
   'newsletter_subscribers',
   'shift_reports',
+  'cashier_staff',
 ] as const;
 
 function normalizeProductRow(row: any): Product {
@@ -177,15 +188,29 @@ function assembleOrders(ordersData: any[], itemsData: any[] | null): Order[] {
   return ordersData.map((ord: any) => {
     const items = (itemsData || [])
       .filter((item: any) => item.order_id === ord.id)
-      .map((item: any) => ({
-        product_id: item.product_id || '',
-        product_name_en: item.product_name_en,
-        product_name_ar: item.product_name_ar,
-        quantity: item.quantity,
-        unit_price: Number(item.unit_price),
-        total_price: Number(item.total_price),
-        image: item.image,
-      }));
+      .map((item: any) => {
+        let parsedAddons: SelectedAddon[] = [];
+        if (Array.isArray(item.selected_addons)) {
+          parsedAddons = item.selected_addons;
+        } else if (typeof item.selected_addons === 'string') {
+          try {
+            parsedAddons = JSON.parse(item.selected_addons);
+          } catch {
+            parsedAddons = [];
+          }
+        }
+        return {
+          product_id: item.product_id || '',
+          product_name_en: item.product_name_en,
+          product_name_ar: item.product_name_ar,
+          quantity: item.quantity,
+          unit_price: Number(item.unit_price),
+          total_price: Number(item.total_price),
+          image: item.image,
+          selected_addons: parsedAddons,
+          addon_total: Number(item.addon_total) || 0,
+        };
+      });
 
     return {
       id: ord.id,
@@ -193,6 +218,7 @@ function assembleOrders(ordersData: any[], itemsData: any[] | null): Order[] {
       order_type: ord.order_type,
       customer_name: ord.customer_name,
       customer_phone: ord.customer_phone,
+      staff_name: ord.staff_name || undefined,
       table_number: ord.table_number || undefined,
       delivery_address: ord.delivery_address || undefined,
       pickup_time: ord.pickup_time || undefined,
@@ -291,8 +317,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   
   // Contact Messages & Inquiries State
   const [contactMessages, setContactMessages] = useState<ContactMessage[]>(() => {
-    // When Supabase is configured, start empty so real DB data (even 0 rows) is faithfully reflected
-    if (supabase) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CONTACT_MESSAGES);
       if (saved) return JSON.parse(saved);
@@ -325,8 +349,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Newsletter Subscribers State
   const [newsletterSubscribers, setNewsletterSubscribers] = useState<NewsletterSubscriber[]>(() => {
-    // When Supabase is configured, start empty so real DB data (even 0 rows) is faithfully reflected
-    if (supabase) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.NEWSLETTER_SUBSCRIBERS);
       if (saved) return JSON.parse(saved);
@@ -368,11 +390,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           );
 
           if (!prodError && Array.isArray(remoteProducts)) {
-            setProducts(remoteProducts);
+            if (remoteProducts.length > 0) {
+              setProducts(remoteProducts);
+            }
             if (prodFromCache) {
               console.info(`[StoreContext] ⚡ Loaded ${remoteProducts.length} products from client-side cache`);
             } else {
-              console.info(`[StoreContext] 📦 Loaded ${remoteProducts.length} products from Supabase (empty table reflects as 0 items)`);
+              console.info(`[StoreContext] 📦 Loaded ${remoteProducts.length} products from Supabase`);
             }
           } else if (prodError) {
             console.warn('[StoreContext] Failed fetching products from Supabase (network/server error):', prodError);
@@ -396,11 +420,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           );
 
           if (!msgError && Array.isArray(messages)) {
-            setContactMessages(messages);
+            if (messages.length > 0) {
+              setContactMessages(messages);
+            }
             if (msgFromCache) {
               console.info(`[StoreContext] ⚡ Loaded ${messages.length} contact_messages from client-side cache`);
             } else {
-              console.info(`[StoreContext] 📨 Loaded ${messages.length} contact_messages from Supabase (empty table reflects as 0 rows)`);
+              console.info(`[StoreContext] 📨 Loaded ${messages.length} contact_messages from Supabase`);
             }
           } else if (msgError) {
             console.warn('[StoreContext] Failed fetching contact_messages from Supabase:', msgError);
@@ -424,11 +450,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           );
 
           if (!subError && Array.isArray(subs)) {
-            setNewsletterSubscribers(subs);
+            if (subs.length > 0) {
+              setNewsletterSubscribers(subs);
+            }
             if (subsFromCache) {
               console.info(`[StoreContext] ⚡ Loaded ${subs.length} newsletter_subscribers from client-side cache`);
             } else {
-              console.info(`[StoreContext] 📬 Loaded ${subs.length} newsletter_subscribers from Supabase (empty table reflects as 0 rows)`);
+              console.info(`[StoreContext] 📬 Loaded ${subs.length} newsletter_subscribers from Supabase`);
             }
           } else if (subError) {
             console.warn('[StoreContext] Failed fetching newsletter_subscribers from Supabase:', subError);
@@ -520,6 +548,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         } catch (err) {
           console.warn('Error loading shift_reports from Supabase via cache:', err);
+        }
+
+        try {
+          // 6. Fetch cashier staff
+          const { data: remoteStaff, error: staffErr } = await supabase!
+            .from('cashier_staff')
+            .select('*')
+            .order('created_at', { ascending: true });
+
+          if (!staffErr && Array.isArray(remoteStaff) && remoteStaff.length > 0) {
+            setCashierStaffList(remoteStaff);
+            localStorage.setItem(STORAGE_KEYS.CASHIER_STAFF, JSON.stringify(remoteStaff));
+          }
+        } catch (err) {
+          console.warn('Error loading cashier_staff from Supabase:', err);
         }
       };
 
@@ -625,6 +668,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
+    const refetchStaff = async () => {
+      try {
+        const { data: staffData } = await client
+          .from('cashier_staff')
+          .select('*')
+          .order('created_at', { ascending: true });
+        if (!cancelled && staffData && Array.isArray(staffData)) {
+          setCashierStaffList(staffData);
+          localStorage.setItem(STORAGE_KEYS.CASHIER_STAFF, JSON.stringify(staffData));
+        }
+      } catch (err) {
+        console.warn('Realtime refetch cashier_staff error:', err);
+      }
+    };
+
     const channel = client
       .channel('ch-realtime-core')
       .on(
@@ -694,6 +752,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         () => {
           invalidateCache('shift_reports');
           void refetchShiftReports();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cashier_staff' },
+        () => {
+          void refetchStaff();
         }
       )
       .subscribe((status) => {
@@ -955,8 +1020,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch (e) {
       console.error(e);
     }
-    // With Supabase configured, default to empty list so real DB data (even when 0 rows) is faithfully reflected
-    return supabase ? [] : INITIAL_PRODUCTS;
+    return INITIAL_PRODUCTS;
   });
 
   useEffect(() => {
@@ -1105,27 +1169,132 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
+  // Staff Attribution State
+  const [cashierStaffList, setCashierStaffList] = useState<CashierStaff[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CASHIER_STAFF);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: 'staff-1', name: 'أحمد إمام', created_at: new Date().toISOString() },
+      { id: 'staff-2', name: 'كابتن الصالة', created_at: new Date().toISOString() },
+    ];
+  });
+
+  const addCashierStaff = async (name: string): Promise<boolean> => {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+
+    const newStaff: CashierStaff = {
+      id: `staff-${Date.now()}`,
+      name: trimmed,
+      created_at: new Date().toISOString(),
+    };
+
+    setCashierStaffList((prev) => {
+      const next = [...prev, newStaff];
+      localStorage.setItem(STORAGE_KEYS.CASHIER_STAFF, JSON.stringify(next));
+      return next;
+    });
+
+    if (supabase) {
+      try {
+        await supabase.from('cashier_staff').insert({
+          id: newStaff.id,
+          name: newStaff.name,
+          created_at: newStaff.created_at,
+        });
+      } catch (err) {
+        console.warn('Failed to insert cashier_staff to Supabase:', err);
+      }
+    }
+
+    showToast(
+      language === 'ar'
+        ? `تمت إضافة "${trimmed}" إلى فريق الكاشير`
+        : `Added "${trimmed}" to cashier staff`,
+      'success'
+    );
+    return true;
+  };
+
+  const removeCashierStaff = async (id: string): Promise<boolean> => {
+    const target = cashierStaffList.find((s) => s.id === id);
+    setCashierStaffList((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      localStorage.setItem(STORAGE_KEYS.CASHIER_STAFF, JSON.stringify(next));
+      return next;
+    });
+
+    if (supabase) {
+      try {
+        await supabase.from('cashier_staff').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Failed to delete cashier_staff from Supabase:', err);
+      }
+    }
+
+    showToast(
+      language === 'ar'
+        ? `تم حذف "${target?.name || ''}" من فريق الكاشير`
+        : `Removed staff member`,
+      'info'
+    );
+    return true;
+  };
+
+  const toggleCashierStaff = async (id: string, is_active: boolean): Promise<boolean> => {
+    setCashierStaffList((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, is_active } : s));
+      localStorage.setItem(STORAGE_KEYS.CASHIER_STAFF, JSON.stringify(next));
+      return next;
+    });
+
+    if (supabase) {
+      try {
+        await supabase.from('cashier_staff').update({ is_active }).eq('id', id);
+      } catch (err) {
+        console.warn('Failed to update cashier_staff in Supabase:', err);
+      }
+    }
+
+    showToast(
+      language === 'ar'
+        ? (is_active ? 'تم تفعيل الموظف' : 'تم تعطيل الموظف')
+        : (is_active ? 'Staff activated' : 'Staff deactivated'),
+      'info'
+    );
+    return true;
+  };
+
   // 4. Cart State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
-  const addToCart = (product: Product, quantity = 1): boolean => {
-    if (product.stock <= 0) {
+  const addToCart = (product: Product, quantity = 1, selectedAddons: SelectedAddon[] = []): boolean => {
+    const currentProduct = products.find((p) => p.id === product.id) || product;
+    if (currentProduct.stock <= 0) {
       showToast(language === 'ar' ? 'عذراً، هذا الصنف غير متوفر حالياً' : 'Sorry, this item is sold out', 'error');
       return false;
     }
 
-    const unitPrice = product.discount_price ?? product.price;
-    const existing = cart.find((item) => item.product_id === product.id);
+    const basePrice = product.discount_price ?? product.price;
+    const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+    const unitPrice = basePrice + addonTotal;
+
+    const addonKey = selectedAddons.map((a) => a.id).sort().join('_');
+    const cartItemId = `${product.id}_${addonKey}`;
+
+    const existing = cart.find((item) => (item.cart_item_id || item.product_id) === cartItemId);
     const currentQty = existing ? existing.quantity : 0;
     const newQty = currentQty + quantity;
 
-    if (newQty > product.stock) {
+    if (newQty > currentProduct.stock) {
       showToast(
         language === 'ar'
-          ? `الكمية المطلوبة تتجاوز المخزون المتبقي (${product.stock} قطعة)`
-          : `Requested quantity exceeds available stock (${product.stock} available)`,
+          ? `الكمية المطلوبة تتجاوز المخزون المتبقي (${currentProduct.stock} قطعة)`
+          : `Requested quantity exceeds available stock (${currentProduct.stock} available)`,
         'warning'
       );
       return false;
@@ -1134,7 +1303,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (existing) {
       setCart((prev) =>
         prev.map((item) =>
-          item.product_id === product.id
+          (item.cart_item_id || item.product_id) === cartItemId
             ? {
                 ...item,
                 quantity: newQty,
@@ -1146,11 +1315,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       );
     } else {
       const newItem: CartItem = {
+        cart_item_id: cartItemId,
         product_id: product.id,
         product_name_en: product.name_en,
         product_name_ar: product.name_ar,
         quantity,
         unit_price: unitPrice,
+        addon_total: addonTotal,
+        selected_addons: selectedAddons,
         total_price: quantity * unitPrice,
         image: product.image,
         stock: product.stock,
@@ -1167,20 +1339,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item.product_id !== productId));
+  const removeFromCart = (cartItemIdOrProdId: string) => {
+    setCart((prev) =>
+      prev.filter(
+        (item) =>
+          (item.cart_item_id || item.product_id) !== cartItemIdOrProdId &&
+          item.product_id !== cartItemIdOrProdId
+      )
+    );
   };
 
-  const updateCartQuantity = (productId: string, quantity: number) => {
+  const updateCartQuantity = (cartItemIdOrProdId: string, quantity: number) => {
     if (quantity <= 0) {
-      removeFromCart(productId);
+      removeFromCart(cartItemIdOrProdId);
       return;
     }
 
-    const item = cart.find((i) => i.product_id === productId);
+    const item = cart.find(
+      (i) =>
+        (i.cart_item_id || i.product_id) === cartItemIdOrProdId ||
+        i.product_id === cartItemIdOrProdId
+    );
     if (!item) return;
 
-    const currentProduct = products.find((p) => p.id === productId);
+    const currentProduct = products.find((p) => p.id === item.product_id);
     const availableStock = currentProduct ? currentProduct.stock : item.stock;
 
     if (quantity > availableStock) {
@@ -1195,7 +1377,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setCart((prev) =>
       prev.map((i) =>
-        i.product_id === productId
+        (i.cart_item_id || i.product_id) === cartItemIdOrProdId ||
+        i.product_id === cartItemIdOrProdId
           ? {
               ...i,
               quantity,
@@ -1320,6 +1503,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             order_type: newOrder.order_type,
             customer_name: newOrder.customer_name,
             customer_phone: newOrder.customer_phone,
+            staff_name: newOrder.staff_name || null,
             table_number: newOrder.table_number || null,
             delivery_address: newOrder.delivery_address || null,
             pickup_time: newOrder.pickup_time || null,
@@ -1347,6 +1531,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             unit_price: item.unit_price,
             total_price: item.total_price,
             image: item.image || null,
+            selected_addons: item.selected_addons || [],
+            addon_total: Number(item.addon_total) || 0,
           }));
 
           if (itemsPayload.length > 0) {
@@ -1784,6 +1970,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const ordersSheetData = monthOrders.map((o) => ({
       'Order #': o.order_number,
       'Date & Time': new Date(o.created_at).toLocaleString(),
+      'Staff / Cashier': o.staff_name || 'N/A',
       'Type': o.order_type,
       'Customer Name': o.customer_name,
       'Customer Phone': o.customer_phone,
@@ -1805,15 +1992,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     XLSX.utils.book_append_sheet(wb, ordersWs, 'Orders');
 
     // Sheet 2: Order Items
-    const itemsSheetData = monthItems.map((item) => ({
-      'Order #': item.order_number,
-      'Order Date': item.order_date ? new Date(item.order_date).toLocaleString() : '',
-      'Product Name (EN)': item.product_name_en,
-      'Product Name (AR)': item.product_name_ar,
-      'Quantity': item.quantity,
-      'Unit Price (EGP)': item.unit_price,
-      'Total Price (EGP)': item.total_price,
-    }));
+    const itemsSheetData = monthItems.map((item) => {
+      let addonsStr = 'None';
+      if (Array.isArray(item.selected_addons) && item.selected_addons.length > 0) {
+        addonsStr = item.selected_addons.map((a: any) => `${a.name_en || a.name || ''} (+${a.price} EGP)`).join(', ');
+      } else if (typeof item.selected_addons === 'string') {
+        try {
+          const parsed = JSON.parse(item.selected_addons);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            addonsStr = parsed.map((a: any) => `${a.name_en || a.name || ''} (+${a.price} EGP)`).join(', ');
+          }
+        } catch {}
+      }
+
+      const ord = monthOrders.find((o) => o.id === item.order_id);
+
+      return {
+        'Order #': item.order_number || ord?.order_number || '',
+        'Order Date': item.order_date ? new Date(item.order_date).toLocaleString() : (ord ? new Date(ord.created_at).toLocaleString() : ''),
+        'Product Name (EN)': item.product_name_en,
+        'Product Name (AR)': item.product_name_ar,
+        'Quantity': item.quantity,
+        'Base Unit Price (EGP)': (Number(item.unit_price) - (Number(item.addon_total) || 0)),
+        'Add-ons Selected': addonsStr,
+        'Add-ons Extra Cost (EGP)': Number(item.addon_total) || 0,
+        'Final Unit Price (EGP)': Number(item.unit_price),
+        'Total Price (EGP)': Number(item.total_price),
+      };
+    });
     const itemsWs = XLSX.utils.json_to_sheet(
       itemsSheetData.length > 0 ? itemsSheetData : [{ Message: 'No items recorded for this month' }]
     );
@@ -2362,6 +2568,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         cartSubtotal,
         cartDiscount,
         cartTotal,
+        cashierStaffList,
+        addCashierStaff,
+        removeCashierStaff,
+        toggleCashierStaff,
         orders,
         dailyOrders,
         placeOrder,

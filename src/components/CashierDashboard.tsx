@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { OrderStatus, Expense, Product, OrderType, PaymentMethod } from '../types';
+import { OrderStatus, Expense, Product, OrderType, PaymentMethod, SelectedAddon, CashierStaff } from '../types';
 import { AuthModal } from './AuthModal';
+import { ProductCustomizeModal } from './ProductCustomizeModal';
 import {
   Banknote,
   CreditCard,
@@ -30,11 +31,20 @@ import {
   AlertTriangle,
   Loader2,
   ShieldAlert,
+  Sliders,
+  UserCheck,
+  UserPlus,
+  X,
+  Sparkles,
 } from 'lucide-react';
 
 interface PosCartItem {
+  id: string;
   product: Product;
   quantity: number;
+  selected_addons?: SelectedAddon[];
+  addon_total?: number;
+  unit_price: number;
 }
 
 export const CashierDashboard: React.FC = () => {
@@ -54,7 +64,58 @@ export const CashierDashboard: React.FC = () => {
     logout,
     setActiveView,
     showToast,
+    cashierStaffList,
+    addCashierStaff,
   } = useStore();
+
+  // Active Staff Selection State
+  const [activeStaffName, setActiveStaffName] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('chocolate_house_active_staff');
+      if (saved) return saved;
+    } catch {}
+    const activeStaff = cashierStaffList?.find((s) => s.is_active !== false);
+    return activeStaff?.name || currentUser?.name || 'Ahmed';
+  });
+
+  const [closingStaffName, setClosingStaffName] = useState<string>(activeStaffName);
+  const [isAddStaffModalOpen, setIsAddStaffModalOpen] = useState(false);
+  const [newStaffInput, setNewStaffInput] = useState('');
+  const [isAddingStaff, setIsAddingStaff] = useState(false);
+
+  // Customization modal in POS
+  const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
+
+  const handleSelectStaff = (name: string) => {
+    setActiveStaffName(name);
+    setClosingStaffName(name);
+    try {
+      localStorage.setItem('chocolate_house_active_staff', name);
+    } catch {}
+    showToast(
+      language === 'ar'
+        ? `الكاشير المسؤول الآن: ${name}`
+        : `Active cashier switched to: ${name}`,
+      'info'
+    );
+  };
+
+  const handleAddStaffSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newStaffInput.trim();
+    if (!trimmed) return;
+    setIsAddingStaff(true);
+    try {
+      const ok = await addCashierStaff(trimmed);
+      if (ok) {
+        handleSelectStaff(trimmed);
+        setNewStaffInput('');
+        setIsAddStaffModalOpen(false);
+      }
+    } finally {
+      setIsAddingStaff(false);
+    }
+  };
 
   // 1. Strict Role & Auth Guard
   if (isAuthLoading) {
@@ -126,7 +187,7 @@ export const CashierDashboard: React.FC = () => {
   const expectedPhysicalDrawerCash = Math.max(0, cashOrdersSales - totalShiftExpenses);
 
   // POS Helper Functions
-  const handleAddToPosCart = (product: Product) => {
+  const handleAddToPosCart = (product: Product, selectedAddons: SelectedAddon[] = []) => {
     if (product.stock <= 0) {
       showToast(
         language === 'ar' ? 'هذا الصنف غير متوفر حالياً بالمخزون' : 'This item is currently out of stock',
@@ -135,8 +196,15 @@ export const CashierDashboard: React.FC = () => {
       return;
     }
 
+    const basePrice = product.discount_price || product.price;
+    const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+    const unitPrice = basePrice + addonTotal;
+
+    const addonKey = selectedAddons.map((a) => a.id).sort().join('_');
+    const itemId = `${product.id}_${addonKey}`;
+
     setPosCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
+      const existing = prev.find((item) => item.id === itemId);
       if (existing) {
         if (existing.quantity >= product.stock) {
           showToast(
@@ -148,18 +216,28 @@ export const CashierDashboard: React.FC = () => {
           return prev;
         }
         return prev.map((item) =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.id === itemId ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { product, quantity: 1 }];
+      return [
+        ...prev,
+        {
+          id: itemId,
+          product,
+          quantity: 1,
+          selected_addons: selectedAddons,
+          addon_total: addonTotal,
+          unit_price: unitPrice,
+        },
+      ];
     });
   };
 
-  const handleUpdatePosQuantity = (productId: string, delta: number) => {
+  const handleUpdatePosQuantity = (itemId: string, delta: number) => {
     setPosCart((prev) => {
       return prev
         .map((item) => {
-          if (item.product.id === productId) {
+          if (item.id === itemId) {
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
             if (newQty > item.product.stock) {
@@ -179,14 +257,11 @@ export const CashierDashboard: React.FC = () => {
     });
   };
 
-  const handleRemoveFromPosCart = (productId: string) => {
-    setPosCart((prev) => prev.filter((item) => item.product.id !== productId));
+  const handleRemoveFromPosCart = (itemId: string) => {
+    setPosCart((prev) => prev.filter((item) => item.id !== itemId));
   };
 
-  const posSubtotal = posCart.reduce((sum, item) => {
-    const price = item.product.discount_price || item.product.price;
-    return sum + price * item.quantity;
-  }, 0);
+  const posSubtotal = posCart.reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
 
   const posDiscount = posCart.reduce((sum, item) => {
     if (item.product.discount_price && item.product.discount_price < item.product.price) {
@@ -229,15 +304,16 @@ export const CashierDashboard: React.FC = () => {
     }
 
     const orderItems = posCart.map((item) => {
-      const unitPrice = item.product.discount_price || item.product.price;
       return {
         product_id: item.product.id,
         product_name_en: item.product.name_en,
         product_name_ar: item.product.name_ar,
         quantity: item.quantity,
-        unit_price: unitPrice,
-        total_price: unitPrice * item.quantity,
+        unit_price: item.unit_price,
+        total_price: item.unit_price * item.quantity,
         image: item.product.image,
+        selected_addons: item.selected_addons || [],
+        addon_total: item.addon_total || 0,
       };
     });
 
@@ -248,7 +324,7 @@ export const CashierDashboard: React.FC = () => {
       table_number: posOrderType === 'on-site' ? posTableNumber.trim() : undefined,
       delivery_address: posOrderType === 'delivery' ? posDeliveryAddress.trim() : undefined,
       pickup_time: posOrderType === 'pickup' ? posPickupTime : undefined,
-      notes: posNotes.trim() ? `${posNotes.trim()} (Taken by Cashier: ${currentUser.name})` : `(Cashier: ${currentUser.name})`,
+      notes: posNotes.trim() ? `${posNotes.trim()} (Staff: ${activeStaffName})` : `(Staff: ${activeStaffName})`,
       payment_method: posPaymentMethod,
       transfer_from_phone: posPaymentMethod === 'instapay_wallet' ? posTransferPhone.trim() : undefined,
       amount_transferred: posPaymentMethod === 'instapay_wallet' ? posTotal : undefined,
@@ -258,6 +334,7 @@ export const CashierDashboard: React.FC = () => {
       discount_total: posDiscount,
       total: posTotal,
       is_archived: false,
+      staff_name: activeStaffName,
     });
 
     if (newOrder) {
@@ -397,12 +474,46 @@ export const CashierDashboard: React.FC = () => {
             <span>{language === 'ar' ? 'المتجر العام' : 'Public Store'}</span>
           </button>
 
+          {/* Active Staff Attribution Selector */}
+          <div className="flex items-center gap-1.5 bg-black/30 px-2.5 py-1.5 rounded-xl border border-[#D4AF37]/40">
+            <UserCheck className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
+            <div className="flex flex-col">
+              <span className="text-[9px] text-[#F7E7A9]/70 uppercase font-semibold leading-none">
+                {language === 'ar' ? 'الكاشير المسؤول' : 'Staff On Duty'}
+              </span>
+              <select
+                id="cashier-header-staff-select"
+                value={activeStaffName}
+                onChange={(e) => handleSelectStaff(e.target.value)}
+                className="bg-transparent text-xs font-black text-white focus:outline-hidden cursor-pointer pr-3"
+              >
+                {cashierStaffList.filter((s) => s.is_active !== false).map((staff) => (
+                  <option key={staff.id} value={staff.name} className="text-[#2B140E] bg-white">
+                    {staff.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setNewStaffInput('');
+                setIsAddStaffModalOpen(true);
+              }}
+              className="p-1 rounded-lg bg-white/10 hover:bg-white/25 text-[#D4AF37] transition-colors"
+              title={language === 'ar' ? 'إضافة اسم موظف جديد' : 'Add Cashier Name'}
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+
           {/* End Shift Reconciliation Button */}
           <button
             id="cashier-end-shift-btn"
             onClick={() => {
               setPhysicalCashInput('');
               setShiftNotes('');
+              setClosingStaffName(activeStaffName);
               setShiftCompletedReport(null);
               setIsShiftModalOpen(true);
             }}
@@ -636,7 +747,7 @@ export const CashierDashboard: React.FC = () => {
                   return (
                     <div
                       key={product.id}
-                      onClick={() => !isOutOfStock && handleAddToPosCart(product)}
+                      onClick={() => !isOutOfStock && setCustomizingProduct(product)}
                       className={`p-3 rounded-2xl border transition-all flex flex-col justify-between select-none ${
                         isOutOfStock
                           ? 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
@@ -685,16 +796,41 @@ export const CashierDashboard: React.FC = () => {
                         </p>
                       </div>
 
-                      {/* Price & Add Indicator */}
-                      <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-100">
+                      {/* Price & Action Buttons */}
+                      <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-100 gap-1">
                         <div className="flex items-baseline gap-1">
                           <span className="text-xs font-black text-[#2B140E]">
                             {price}
                           </span>
                           <span className="text-[10px] text-[#8C6212] font-bold">EGP</span>
                         </div>
-                        <div className="w-6 h-6 rounded-lg bg-[#2B140E] text-[#F7E7A9] flex items-center justify-center">
-                          <Plus className="w-3.5 h-3.5" />
+
+                        <div className="flex items-center gap-1">
+                          {/* Quick standard add */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isOutOfStock) handleAddToPosCart(product);
+                            }}
+                            title={language === 'ar' ? 'إضافة سريعة بدون إضافات' : 'Quick Add Standard'}
+                            className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-[#D4AF37]/30 text-[#2B140E] flex items-center justify-center transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          {/* Customize with sizes & add-ons */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isOutOfStock) setCustomizingProduct(product);
+                            }}
+                            title={language === 'ar' ? 'تخصيص الحجم والإضافات' : 'Customize Size & Add-ons'}
+                            className="px-2 py-1 rounded-lg bg-[#2B140E] text-[#F7E7A9] text-[10px] font-bold flex items-center gap-0.5 hover:bg-[#1A0A06] transition-colors"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-[#D4AF37]" />
+                            <span>{language === 'ar' ? 'خيارات' : 'Add-ons'}</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -748,27 +884,40 @@ export const CashierDashboard: React.FC = () => {
                   </div>
                 ) : (
                   posCart.map((item) => {
-                    const unitPrice = item.product.discount_price || item.product.price;
+                    const unitPrice = item.unit_price || (item.product.discount_price || item.product.price);
                     const itemTotal = unitPrice * item.quantity;
                     return (
                       <div
-                        key={item.product.id}
-                        className="p-2.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/20 flex items-center justify-between gap-2"
+                        key={item.id}
+                        className="p-2.5 rounded-xl bg-[#FFFBF5] border border-[#D4AF37]/25 flex items-center justify-between gap-2"
                       >
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-bold text-[#2B140E] truncate">
                             {language === 'ar' ? item.product.name_ar : item.product.name_en}
                           </p>
-                          <p className="text-[10px] text-[#8C6212] font-semibold font-mono">
+                          {item.selected_addons && item.selected_addons.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {item.selected_addons.map((a) => (
+                                <span
+                                  key={a.id}
+                                  className="text-[9px] font-semibold bg-[#2B140E]/5 text-[#2B140E] px-1.5 py-0.5 rounded border border-[#D4AF37]/30"
+                                >
+                                  {language === 'ar' ? a.name_ar : a.name_en}
+                                  {a.price > 0 && ` (+${a.price})`}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-[10px] text-[#8C6212] font-semibold font-mono mt-0.5">
                             {unitPrice} EGP
                           </p>
                         </div>
 
                         {/* Quantity Controls */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
-                            onClick={() => handleUpdatePosQuantity(item.product.id, -1)}
+                            onClick={() => handleUpdatePosQuantity(item.id, -1)}
                             className="w-6 h-6 rounded-lg bg-gray-200 hover:bg-gray-300 text-[#2B140E] flex items-center justify-center text-xs"
                           >
                             <Minus className="w-3 h-3" />
@@ -778,7 +927,7 @@ export const CashierDashboard: React.FC = () => {
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleUpdatePosQuantity(item.product.id, 1)}
+                            onClick={() => handleUpdatePosQuantity(item.id, 1)}
                             className="w-6 h-6 rounded-lg bg-[#2B140E] hover:bg-[#1A0A06] text-[#F7E7A9] flex items-center justify-center text-xs"
                           >
                             <Plus className="w-3 h-3" />
@@ -788,7 +937,7 @@ export const CashierDashboard: React.FC = () => {
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleRemoveFromPosCart(item.product.id)}
+                            onClick={() => handleRemoveFromPosCart(item.id)}
                             className="text-gray-400 hover:text-rose-600 p-1"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -798,6 +947,34 @@ export const CashierDashboard: React.FC = () => {
                     );
                   })
                 )}
+              </div>
+
+              {/* Active Cashier Staff Attribution Banner */}
+              <div className="p-2.5 rounded-xl bg-gradient-to-r from-[#FFFBF5] to-amber-50/60 border border-[#D4AF37]/40 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded-md bg-[#2B140E] text-[#D4AF37]">
+                    <UserCheck className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-gray-500 block leading-tight font-medium">
+                      {language === 'ar' ? 'منشئ الطلب (الكاشير الحالي):' : 'Order Attributed To:'}
+                    </span>
+                    <span className="text-xs font-black text-[#2B140E]">
+                      {activeStaffName}
+                    </span>
+                  </div>
+                </div>
+                <select
+                  value={activeStaffName}
+                  onChange={(e) => handleSelectStaff(e.target.value)}
+                  className="text-[11px] font-bold text-[#8C6212] bg-white px-2 py-1 rounded-lg border border-[#D4AF37]/30 focus:outline-hidden"
+                >
+                  {cashierStaffList.filter((s) => s.is_active !== false).map((staff) => (
+                    <option key={staff.id} value={staff.name}>
+                      {staff.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Order Form Settings */}
@@ -1063,12 +1240,24 @@ export const CashierDashboard: React.FC = () => {
                                 : t.delivery}
                             </span>
                           </div>
-                          <span className="text-[11px] text-gray-500">
-                            {new Date(order.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[11px] text-gray-500">
+                              {new Date(order.created_at).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            {order.staff_name ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#2B140E] bg-[#D4AF37]/20 px-2 py-0.2 rounded-md border border-[#D4AF37]/35">
+                                <UserCheck className="w-2.5 h-2.5 text-[#8C6212]" />
+                                <span>{order.staff_name}</span>
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-semibold text-gray-500 bg-gray-100 px-1.5 py-0.2 rounded">
+                                🌐 {language === 'ar' ? 'أونلاين' : 'Online'}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Status dropdown */}
@@ -1120,13 +1309,24 @@ export const CashierDashboard: React.FC = () => {
                       </div>
 
                       {/* Order Items Preview */}
-                      <div className="text-xs space-y-1">
+                      <div className="text-xs space-y-1.5">
                         {order.items.map((i, idx) => (
-                          <div key={idx} className="flex justify-between text-gray-700 text-[11px]">
-                            <span>
-                              {i.quantity}× {language === 'ar' ? i.product_name_ar : i.product_name_en}
-                            </span>
-                            <span className="font-mono font-semibold">{i.total_price} EGP</span>
+                          <div key={idx} className="text-gray-700 text-[11px]">
+                            <div className="flex justify-between">
+                              <span className="font-semibold">
+                                {i.quantity}× {language === 'ar' ? i.product_name_ar : i.product_name_en}
+                              </span>
+                              <span className="font-mono font-semibold">{i.total_price} EGP</span>
+                            </div>
+                            {i.selected_addons && i.selected_addons.length > 0 && (
+                              <div className="text-[10px] text-[#8C6212] flex flex-wrap gap-1 mt-0.5">
+                                {i.selected_addons.map((a) => (
+                                  <span key={a.id} className="bg-amber-50 px-1 rounded border border-amber-200">
+                                    +{language === 'ar' ? a.name_ar : a.name_en}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1494,6 +1694,27 @@ export const CashierDashboard: React.FC = () => {
                   </p>
                 </div>
 
+                {/* Cashier Attributed to Closing the Shift */}
+                <div>
+                  <label className="text-xs font-black text-[#2B140E] block mb-1.5 uppercase">
+                    {language === 'ar' ? 'الموظف المسؤول عن إغلاق الوردية *' : 'Staff Closing Shift *'}
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="cashier-shift-closing-staff"
+                      value={closingStaffName}
+                      onChange={(e) => setClosingStaffName(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-[#D4AF37]/50 bg-[#FFFBF5] text-xs font-black text-[#2B140E] focus:outline-hidden focus:border-[#D4AF37]"
+                    >
+                      {cashierStaffList.filter((s) => s.is_active !== false).map((staff) => (
+                        <option key={staff.id} value={staff.name}>
+                          👤 {staff.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 {/* Physical Cash Input (MUST BE FILLED BY CASHIER) */}
                 <div>
                   <label className="text-xs font-black text-[#2B140E] block mb-1.5 uppercase">
@@ -1618,6 +1839,86 @@ export const CashierDashboard: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: PRODUCT CUSTOMIZATION (SIZES & ADD-ONS FOR POS) */}
+      {customizingProduct && (
+        <ProductCustomizeModal
+          product={customizingProduct}
+          isOpen={!!customizingProduct}
+          onClose={() => setCustomizingProduct(null)}
+          onConfirm={(product, quantity, selectedAddons) => {
+            for (let i = 0; i < quantity; i++) {
+              handleAddToPosCart(product, selectedAddons);
+            }
+            setCustomizingProduct(null);
+          }}
+          confirmButtonText={language === 'ar' ? 'إضافة للطلب' : 'Add to Ticket'}
+        />
+      )}
+
+      {/* MODAL 4: QUICK ADD CASHIER STAFF */}
+      {isAddStaffModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-[#2B140E] text-[#D4AF37]">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-black text-[#2B140E]">
+                  {language === 'ar' ? 'إضافة موظف كاشير جديد' : 'Add New Cashier Staff'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddStaffModalOpen(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddStaffSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-[#2B140E] block mb-1">
+                  {language === 'ar' ? 'اسم الموظف' : 'Staff Member Name'} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newStaffInput}
+                  onChange={(e) => setNewStaffInput(e.target.value)}
+                  placeholder={language === 'ar' ? 'مثال: محمود أو ياسمين' : 'e.g. Mahmoud or Yasmin'}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:border-[#D4AF37] focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddStaffModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100"
+                >
+                  {t.close}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAddingStaff || !newStaffInput.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isAddingStaff ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <UserPlus className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  )}
+                  <span>{language === 'ar' ? 'إضافة وتعيين حالياً' : 'Add & Set Active'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

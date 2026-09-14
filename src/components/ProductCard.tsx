@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Product } from '../types';
+import { Product, SelectedAddon } from '../types';
 import { useStore } from '../context/StoreContext';
-import { Plus, Minus, Check, Flame, Sparkles, AlertCircle } from 'lucide-react';
+import { Plus, Minus, Check, Flame, Sparkles, AlertCircle, SlidersHorizontal } from 'lucide-react';
+import { ProductCustomizeModal } from './ProductCustomizeModal';
 
 interface ProductCardProps {
   product: Product;
@@ -11,6 +12,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { language, t, addToCart } = useStore();
   const [quantity, setQuantity] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
+  const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
 
   const isSoldOut = product.stock <= 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
@@ -22,9 +24,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     ? Math.round(((originalPrice - (product.discount_price || 0)) / originalPrice) * 100)
     : 0;
 
-  const handleAdd = () => {
+  const handleOpenCustomize = () => {
     if (isSoldOut) return;
-    const success = addToCart(product, quantity);
+    setIsCustomizeOpen(true);
+  };
+
+  const handleConfirmCustomize = (prod: Product, qty: number, addons: SelectedAddon[]) => {
+    const success = addToCart(prod, qty, addons);
     if (success) {
       setJustAdded(true);
       setTimeout(() => setJustAdded(false), 1200);
@@ -178,8 +184,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               {/* Add Button */}
               <button
                 id={`add-btn-${product.id}`}
-                onClick={handleAdd}
-                className="flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-sm active:scale-95"
+                onClick={handleOpenCustomize}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-sm active:scale-95 cursor-pointer"
                 style={{
                   background: justAdded
                     ? '#22543D'
@@ -194,8 +200,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
                   </>
                 ) : (
                   <>
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{t.addToCart}</span>
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'تخصيص وإضافة' : 'Customize & Add'}</span>
                   </>
                 )}
               </button>
@@ -203,6 +209,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           )}
         </div>
       </div>
+
+      {/* Product Customization Modal */}
+      {isCustomizeOpen && (
+        <ProductCustomizeModal
+          product={product}
+          isOpen={isCustomizeOpen}
+          onClose={() => setIsCustomizeOpen(false)}
+          onConfirm={handleConfirmCustomize}
+        />
+      )}
     </div>
   );
 };

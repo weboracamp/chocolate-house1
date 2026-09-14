@@ -34,6 +34,9 @@ import {
   Database,
   Loader2,
   RefreshCw,
+  UserCheck,
+  UserPlus,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const OwnerDashboard: React.FC = () => {
@@ -62,18 +65,26 @@ export const OwnerDashboard: React.FC = () => {
     updateContactMessageStatus,
     newsletterSubscribers,
     deleteNewsletterSubscriber,
+    cashierStaffList,
+    addCashierStaff,
+    toggleCashierStaff,
   } = useStore();
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'inventory' | 'financials' | 'shifts' | 'inquiries' | 'subscribers'
+    'orders' | 'inventory' | 'financials' | 'shifts' | 'inquiries' | 'subscribers' | 'staff'
   >('orders');
 
   // Period filtering for orders ('daily' | 'monthly' | 'yearly')
   const [periodFilter, setPeriodFilter] = useState<'daily' | 'monthly' | 'yearly'>('monthly');
+  const [selectedStaffFilter, setSelectedStaffFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [inquirySearch, setInquirySearch] = useState('');
   const [subscriberSearch, setSubscriberSearch] = useState('');
+
+  // Staff Team Management State
+  const [newOwnerStaffName, setNewOwnerStaffName] = useState('');
+  const [isAddingOwnerStaff, setIsAddingOwnerStaff] = useState(false);
 
   // Product Modal State (Add / Edit)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -129,12 +140,21 @@ export const OwnerDashboard: React.FC = () => {
       return orderDate.getFullYear() === now.getFullYear();
     }
   }).filter((order) => {
+    if (selectedStaffFilter !== 'all') {
+      if (selectedStaffFilter === '__online__') {
+        if (order.staff_name) return false;
+      } else {
+        if (order.staff_name !== selectedStaffFilter) return false;
+      }
+    }
+
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
       order.order_number.toLowerCase().includes(q) ||
       order.customer_name.toLowerCase().includes(q) ||
-      order.customer_phone.includes(q)
+      order.customer_phone.includes(q) ||
+      (order.staff_name && order.staff_name.toLowerCase().includes(q))
     );
   });
 
@@ -575,6 +595,19 @@ export const OwnerDashboard: React.FC = () => {
             <Users className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>{t.newsletterSubscribersTab} ({newsletterSubscribers.length})</span>
           </button>
+
+          <button
+            id="owner-staff-tab"
+            onClick={() => setActiveTab('staff')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeTab === 'staff'
+                ? 'bg-[#2B140E] text-[#F7E7A9] shadow-md'
+                : 'bg-white text-[#2B140E] hover:bg-[#FFFBF5]'
+            }`}
+          >
+            <UserCheck className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <span>{language === 'ar' ? 'فريق الكاشير والورديات' : 'Cashier Staff'} ({cashierStaffList?.length || 0})</span>
+          </button>
         </div>
 
         {/* 4. TAB 1: ORDER MANAGEMENT (Daily, Monthly, Yearly Filtering) */}
@@ -582,23 +615,43 @@ export const OwnerDashboard: React.FC = () => {
           <div className="space-y-4">
             {/* Filters Bar */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-[#D4AF37]/25">
-              {/* Period Selector */}
-              <div className="flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-[#D4AF37] ml-1" />
-                <span className="text-xs font-bold text-[#2B140E] pr-1">{t.filterPeriod}:</span>
-                {(['daily', 'monthly', 'yearly'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPeriodFilter(p)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
-                      periodFilter === p
-                        ? 'bg-[#2B140E] text-[#F7E7A9]'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+              {/* Period & Staff Selector */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-[#D4AF37] ml-1" />
+                  <span className="text-xs font-bold text-[#2B140E] pr-1">{t.filterPeriod}:</span>
+                  {(['daily', 'monthly', 'yearly'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPeriodFilter(p)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
+                        periodFilter === p
+                          ? 'bg-[#2B140E] text-[#F7E7A9]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {t[p]}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Staff Attribution Filter */}
+                <div className="flex items-center gap-1.5 pl-2 border-l border-gray-200">
+                  <UserCheck className="w-3.5 h-3.5 text-[#8C6212]" />
+                  <select
+                    value={selectedStaffFilter}
+                    onChange={(e) => setSelectedStaffFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#FFFBF5] text-[#2B140E] border border-[#D4AF37]/30 focus:outline-hidden"
                   >
-                    {t[p]}
-                  </button>
-                ))}
+                    <option value="all">{language === 'ar' ? 'جميع الموظفين والمصادر' : 'All Staff & Online'}</option>
+                    <option value="__online__">{language === 'ar' ? '🌐 أونلاين فقط (العملاء)' : '🌐 Online Only (Customers)'}</option>
+                    {cashierStaffList?.map((s) => (
+                      <option key={s.id} value={s.name}>
+                        👤 {s.name} ({s.is_active !== false ? 'Active' : 'Inactive'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Search Bar */}
@@ -607,7 +660,7 @@ export const OwnerDashboard: React.FC = () => {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search order #, customer, phone..."
+                  placeholder={language === 'ar' ? 'بحث برقم الطلب، العميل، الموظف...' : 'Search order #, customer, staff...'}
                   className="w-full sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 focus:outline-hidden focus:border-[#D4AF37]"
                 />
                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
@@ -627,8 +680,9 @@ export const OwnerDashboard: React.FC = () => {
                       <tr>
                         <th className="p-3.5">Order #</th>
                         <th className="p-3.5">Type</th>
+                        <th className="p-3.5">Staff / Attribution</th>
                         <th className="p-3.5">Customer & Phone</th>
-                        <th className="p-3.5">Items</th>
+                        <th className="p-3.5">Items & Add-ons</th>
                         <th className="p-3.5">Payment Details</th>
                         <th className="p-3.5">Total</th>
                         <th className="p-3.5">Status</th>
@@ -661,13 +715,37 @@ export const OwnerDashboard: React.FC = () => {
                             </span>
                           </td>
                           <td className="p-3.5">
+                            {order.staff_name ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#2B140E] bg-[#D4AF37]/25 px-2.5 py-1 rounded-lg border border-[#D4AF37]/40 shadow-xs">
+                                <UserCheck className="w-3 h-3 text-[#8C6212]" />
+                                <span>{order.staff_name}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
+                                <span>🌐</span>
+                                <span>{language === 'ar' ? 'أونلاين' : 'Online'}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
                             <div className="font-bold text-[#2B140E]">{order.customer_name}</div>
                             <div className="text-[10px] text-gray-500 font-mono">{order.customer_phone}</div>
                           </td>
-                          <td className="p-3.5 text-[11px] max-w-[180px]">
+                          <td className="p-3.5 text-[11px] max-w-[220px]">
                             {order.items.map((i, idx) => (
-                              <div key={idx} className="truncate">
-                                {i.quantity}× {language === 'ar' ? i.product_name_ar : i.product_name_en}
+                              <div key={idx} className="mb-1">
+                                <div className="font-semibold text-gray-800">
+                                  {i.quantity}× {language === 'ar' ? i.product_name_ar : i.product_name_en}
+                                </div>
+                                {i.selected_addons && i.selected_addons.length > 0 && (
+                                  <div className="text-[10px] text-[#8C6212] font-medium pl-1 flex flex-wrap gap-1 mt-0.5">
+                                    {i.selected_addons.map((a) => (
+                                      <span key={a.id} className="bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
+                                        +{language === 'ar' ? a.name_ar : a.name_en}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </td>
@@ -905,7 +983,12 @@ export const OwnerDashboard: React.FC = () => {
                       {shiftReports.map((sr) => (
                         <tr key={sr.id} className="hover:bg-amber-50/40">
                           <td className="p-3.5 font-mono font-bold">{sr.shift_number}</td>
-                          <td className="p-3.5 font-semibold">{sr.cashier_name}</td>
+                          <td className="p-3.5">
+                            <span className="inline-flex items-center gap-1.5 font-bold text-[#2B140E] bg-[#D4AF37]/25 px-2.5 py-1 rounded-lg border border-[#D4AF37]/40 shadow-xs">
+                              <UserCheck className="w-3.5 h-3.5 text-[#8C6212]" />
+                              <span>{sr.cashier_name || 'Staff'}</span>
+                            </span>
+                          </td>
                           <td className="p-3.5">{sr.total_orders_count}</td>
                           <td className="p-3.5 font-bold font-mono">{sr.total_sales.toFixed(2)} EGP</td>
                           <td className="p-3.5 text-[11px]">
@@ -1222,6 +1305,184 @@ export const OwnerDashboard: React.FC = () => {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* 6. TAB: CASHIER STAFF & ATTRIBUTION MANAGEMENT */}
+        {activeTab === 'staff' && (
+          <div className="space-y-4">
+            {/* Header & Add Staff Form */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-[#D4AF37]/25 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-[#2B140E] text-[#D4AF37]">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-[#2B140E]">
+                    {language === 'ar' ? 'إدارة فريق الكاشير ونسب العمليات' : 'Cashier Staff & Shift Attribution'}
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {language === 'ar'
+                      ? 'إضافة وتعطيل أسماء موظفي الكاشير لتتبع من أنشأ كل طلب ومن أغلق كل وردية بدقة'
+                      : 'Manage staff names to track which cashier created each order and closed each shift'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Add Staff Inline Form */}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!newOwnerStaffName.trim()) return;
+                  setIsAddingOwnerStaff(true);
+                  try {
+                    await addCashierStaff(newOwnerStaffName.trim());
+                    setNewOwnerStaffName('');
+                  } finally {
+                    setIsAddingOwnerStaff(false);
+                  }
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  required
+                  value={newOwnerStaffName}
+                  onChange={(e) => setNewOwnerStaffName(e.target.value)}
+                  placeholder={language === 'ar' ? 'اسم موظف جديد...' : 'New staff name...'}
+                  className="px-3.5 py-2 text-xs rounded-xl border border-gray-200 focus:border-[#D4AF37] focus:outline-hidden w-48 sm:w-56"
+                />
+                <button
+                  type="submit"
+                  disabled={isAddingOwnerStaff || !newOwnerStaffName.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-all disabled:opacity-50 shrink-0"
+                >
+                  {isAddingOwnerStaff ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <UserPlus className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  )}
+                  <span>{language === 'ar' ? 'إضافة موظف' : 'Add Staff'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Staff Analytics Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-white p-4 rounded-2xl border border-[#D4AF37]/20 shadow-xs">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                  {language === 'ar' ? 'إجمالي طاقم الكاشير' : 'Total Staff Members'}
+                </span>
+                <div className="text-2xl font-black text-[#2B140E] mt-1">
+                  {cashierStaffList?.length || 0}
+                </div>
+                <span className="text-[10px] text-emerald-600 font-semibold">
+                  {cashierStaffList?.filter((s) => s.is_active !== false).length || 0} {language === 'ar' ? 'نشط حالياً' : 'active now'}
+                </span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-[#D4AF37]/20 shadow-xs">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                  {language === 'ar' ? 'طلبات الكاشير المنسوبة' : 'Attributed Cashier Orders'}
+                </span>
+                <div className="text-2xl font-black text-[#8C6212] mt-1">
+                  {orders.filter((o) => o.staff_name).length}
+                </div>
+                <span className="text-[10px] text-gray-500">
+                  {language === 'ar' ? 'مقابل' : 'vs'} {orders.filter((o) => !o.staff_name).length} {language === 'ar' ? 'طلب أونلاين' : 'online orders'}
+                </span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-[#D4AF37]/20 shadow-xs">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                  {language === 'ar' ? 'الورديات المغلقة المنسوبة' : 'Audited Shift Closes'}
+                </span>
+                <div className="text-2xl font-black text-[#2B140E] mt-1">
+                  {shiftReports.length}
+                </div>
+                <span className="text-[10px] text-gray-500">
+                  {language === 'ar' ? 'مع نسب الموظف المسؤول' : 'With verified responsible staff'}
+                </span>
+              </div>
+            </div>
+
+            {/* Staff Roster Table */}
+            <div className="bg-white rounded-2xl border border-[#D4AF37]/30 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FFFBF5] text-[#2B140E] border-b border-[#D4AF37]/20 font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="p-3.5">Staff Name</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5">Attributed Orders</th>
+                      <th className="p-3.5">Attributed Sales</th>
+                      <th className="p-3.5">Shifts Closed</th>
+                      <th className="p-3.5 text-right rtl:text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {cashierStaffList?.map((staff) => {
+                      const staffOrders = orders.filter((o) => o.staff_name === staff.name);
+                      const staffSales = staffOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+                      const staffShifts = shiftReports.filter((sr) => sr.cashier_name === staff.name);
+                      const isActive = staff.is_active !== false;
+
+                      return (
+                        <tr key={staff.id} className="hover:bg-amber-50/40 transition-colors">
+                          <td className="p-3.5 font-bold text-[#2B140E]">
+                            <div className="flex items-center gap-2">
+                              <span className="p-1.5 rounded-lg bg-[#D4AF37]/20 text-[#8C6212]">
+                                <UserCheck className="w-4 h-4" />
+                              </span>
+                              <span className="text-sm font-black">{staff.name}</span>
+                            </div>
+                          </td>
+                          <td className="p-3.5">
+                            {isActive ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'نشط في الكاشير' : 'Active in POS'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-300">
+                                <span>{language === 'ar' ? 'معطل' : 'Inactive'}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5 font-mono font-bold text-[#2B140E]">
+                            {staffOrders.length} {language === 'ar' ? 'طلب' : 'orders'}
+                          </td>
+                          <td className="p-3.5 font-mono font-bold text-[#8C6212]">
+                            {staffSales.toFixed(2)} EGP
+                          </td>
+                          <td className="p-3.5 font-mono text-gray-700">
+                            {staffShifts.length} {language === 'ar' ? 'وردية' : 'shifts'}
+                          </td>
+                          <td className="p-3.5 text-right rtl:text-left">
+                            <button
+                              onClick={() => toggleCashierStaff(staff.id, !isActive)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                isActive
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                              }`}
+                            >
+                              {isActive
+                                ? language === 'ar'
+                                  ? 'تعطيل من الكاشير'
+                                  : 'Deactivate'
+                                : language === 'ar'
+                                ? 'تفعيل'
+                                : 'Activate'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
