@@ -163,11 +163,11 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
           onClose();
         }
       }}
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-lg bg-[#FFFBF5] rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-6 flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-[95vw] sm:max-w-lg bg-[#FFFBF5] rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-4 sm:my-6 flex flex-col max-h-[90vh]"
       >
         {/* Header with Product Preview */}
         <div className="p-4 sm:p-5 bg-[#2B140E] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
@@ -204,7 +204,7 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
           <button
             id="close-customize-modal-btn"
             onClick={onClose}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors shrink-0"
+            className="p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors shrink-0"
             aria-label="Close modal"
           >
             <X className="w-5 h-5" />
@@ -226,7 +226,7 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                 {SIZE_OPTIONS.map((size) => {
                   const isSelected = selectedSizeId === size.id;
                   return (
@@ -235,7 +235,7 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
                       type="button"
                       id={`size-opt-${size.id}`}
                       onClick={() => setSelectedSizeId(size.id)}
-                      className={`p-3.5 rounded-2xl border text-center flex flex-col items-center justify-between gap-1.5 transition-all duration-200 cursor-pointer ${
+                      className={`p-3 sm:p-3.5 min-h-[48px] rounded-2xl border text-center flex flex-col items-center justify-between gap-1.5 transition-all duration-200 cursor-pointer ${
                         isSelected
                           ? 'bg-[#2B140E] text-[#F7E7A9] border-[#D4AF37] shadow-md ring-2 ring-[#D4AF37]/40'
                           : 'bg-white text-[#2B140E] border-gray-200 hover:border-[#D4AF37]/50 hover:bg-amber-50/40'
@@ -272,7 +272,7 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {FLAVOR_OPTIONS.map((flavor) => {
                 const isChecked = selectedAddonIds.includes(flavor.id);
                 return (

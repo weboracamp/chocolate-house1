@@ -93,7 +93,7 @@ export const CategoryFilter: React.FC<CategoryFilterProps> = ({
         <button
           id="category-all-btn"
           onClick={() => onSelectCategory('all')}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 shrink-0 ${
+          className={`flex items-center gap-1.5 px-4 py-2 min-h-[40px] rounded-full text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 shrink-0 cursor-pointer ${
             selectedCategory === 'all'
               ? 'shadow-md scale-102'
               : 'hover:bg-[#F5EDE0] opacity-85 hover:opacity-100'
@@ -131,7 +131,7 @@ export const CategoryFilter: React.FC<CategoryFilterProps> = ({
               key={cat}
               id={`cat-btn-${cat.toLowerCase().replace(/\s+/g, '-')}`}
               onClick={() => onSelectCategory(cat)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 shrink-0 ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-full text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 shrink-0 cursor-pointer ${
                 isSelected
                   ? 'shadow-md scale-102'
                   : 'hover:bg-[#F5EDE0] opacity-85 hover:opacity-100'

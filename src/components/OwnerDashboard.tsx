@@ -340,10 +340,10 @@ export const OwnerDashboard: React.FC = () => {
         </div>
 
         {/* Top Header Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
           <button
             onClick={() => setActiveView('store')}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-[#F7E7A9] hover:bg-white/20 transition-colors"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-[#F7E7A9] hover:bg-white/20 transition-colors min-h-[36px]"
           >
             <ExternalLink className="w-3.5 h-3.5" />
             <span>{language === 'ar' ? 'المتجر العام' : 'Public Store'}</span>
@@ -352,11 +352,12 @@ export const OwnerDashboard: React.FC = () => {
           {/* Switch to Cashier View for Owner */}
           <button
             onClick={() => setActiveView('cashier')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
             title="Switch to Cashier Terminal"
           >
             <Receipt className="w-3.5 h-3.5 text-[#D4AF37]" />
-            <span>{language === 'ar' ? 'نظام الكاشير' : 'Cashier Terminal'}</span>
+            <span className="hidden sm:inline">{language === 'ar' ? 'نظام الكاشير' : 'Cashier Terminal'}</span>
+            <span className="sm:hidden">{language === 'ar' ? 'الكاشير' : 'POS'}</span>
           </button>
 
           {/* Export & Reset CTA (Monthly Orders) */}
@@ -366,15 +367,16 @@ export const OwnerDashboard: React.FC = () => {
               setExportedSummary(null);
               setIsExportModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 min-h-[36px] rounded-lg text-xs font-black shadow-md transition-all active:scale-95"
             style={{
               background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
               color: '#1A0A06',
             }}
             title={language === 'ar' ? 'تصدير وأرشفة طلبات الشهر' : 'Export & Reset Monthly Orders'}
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>{t.exportAndReset}</span>
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden md:inline">{t.exportAndReset}</span>
+            <span className="md:hidden text-[11px]">{language === 'ar' ? 'تصدير' : 'Export'}</span>
           </button>
 
           {/* Export & Reset CTA (Shift Reports) */}
@@ -384,7 +386,7 @@ export const OwnerDashboard: React.FC = () => {
               setExportedShiftsSummary(null);
               setIsExportShiftsModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all active:scale-95 border border-[#D4AF37]/50"
+            className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 min-h-[36px] rounded-lg text-xs font-black shadow-md transition-all active:scale-95 border border-[#D4AF37]/50"
             style={{
               background: 'linear-gradient(135deg, #2B140E 0%, #1A0A06 100%)',
               color: '#F7E7A9',
@@ -397,8 +399,9 @@ export const OwnerDashboard: React.FC = () => {
 
           <button
             onClick={logout}
-            className="p-1.5 rounded-lg text-red-300 hover:text-white hover:bg-red-900/30 transition-colors"
+            className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-red-300 hover:text-white hover:bg-red-900/30 transition-colors"
             title={t.logout}
+            aria-label="Log out"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -537,7 +540,7 @@ export const OwnerDashboard: React.FC = () => {
         </div>
 
         {/* 3. NAVIGATION TABS */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[#D4AF37]/30 pb-3">
+        <div className="flex items-center gap-2 border-b border-[#D4AF37]/30 pb-3 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap">
           <button
             onClick={() => setActiveTab('orders')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -1491,8 +1494,8 @@ export const OwnerDashboard: React.FC = () => {
 
       {/* MODAL: VIEW INQUIRY DETAILS */}
       {selectedMessage && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-lg bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div className="flex items-center gap-2">
                 <Mail className="w-5 h-5 text-[#D4AF37]" />
@@ -1506,7 +1509,7 @@ export const OwnerDashboard: React.FC = () => {
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2 bg-[#FFFBF5] p-3 rounded-xl border border-[#D4AF37]/20">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-[#FFFBF5] p-3 rounded-xl border border-[#D4AF37]/20">
                 <div>
                   <span className="text-gray-500 block text-[10px] uppercase font-bold">{t.senderName}:</span>
                   <span className="font-bold text-[#2B140E]">{selectedMessage.name}</span>
@@ -1597,8 +1600,8 @@ export const OwnerDashboard: React.FC = () => {
 
       {/* MODAL 1: ADD / EDIT PRODUCT */}
       {isProductModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-lg bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             <h3
               className="text-lg font-bold text-[#2B140E]"
               style={{ fontFamily: language === 'ar' ? "'Cairo', sans-serif" : "'Cinzel', serif" }}
@@ -1607,7 +1610,7 @@ export const OwnerDashboard: React.FC = () => {
             </h3>
 
             <form onSubmit={handleSaveProduct} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[#2B140E] block mb-1">
                     Name (English) *
@@ -1655,7 +1658,7 @@ export const OwnerDashboard: React.FC = () => {
                 </select>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[#2B140E] block mb-1">
                     Regular Price (EGP) *
@@ -1714,7 +1717,7 @@ export const OwnerDashboard: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[#2B140E] block mb-1">
                     Description (English)
@@ -1783,8 +1786,8 @@ export const OwnerDashboard: React.FC = () => {
 
       {/* MODAL 2: EXPORT & RESET CONFIRMATION */}
       {isExportModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             {!exportedSummary ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
@@ -1892,8 +1895,8 @@ export const OwnerDashboard: React.FC = () => {
 
       {/* MODAL 3: EXPORT & RESET SHIFT REPORTS CONFIRMATION */}
       {isExportShiftsModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             {!exportedShiftsSummary ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">

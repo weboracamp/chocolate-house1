@@ -95,17 +95,19 @@ export const Header: React.FC = () => {
           <button
             id="cart-trigger-btn"
             onClick={() => setIsCartOpen(true)}
-            className="relative flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full font-bold text-xs sm:text-sm transition-all duration-200 shadow-md active:scale-95 whitespace-nowrap"
+            className="relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 min-h-[40px] rounded-full font-bold text-xs sm:text-sm transition-all duration-200 shadow-md active:scale-95 whitespace-nowrap"
             style={{
               background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
               color: '#1A0A06',
               boxShadow: '0 4px 12px rgba(212, 175, 55, 0.35)',
             }}
+            aria-label="Open cart"
           >
             <ShoppingCart className="w-4 h-4 text-[#1A0A06] shrink-0" />
-            <span>My Cart | طلباتي</span>
+            <span className="hidden sm:inline">My Cart | طلباتي</span>
+            <span className="sm:hidden">{language === 'ar' ? 'السلة' : 'Cart'}</span>
             {cartCount > 0 && (
-              <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-[#1A0A06] text-[#F7E7A9] text-xs font-black">
+              <span className="flex items-center justify-center min-w-[18px] sm:min-w-[20px] h-4.5 sm:h-5 px-1 rounded-full bg-[#1A0A06] text-[#F7E7A9] text-[10px] sm:text-xs font-black">
                 {cartCount}
               </span>
             )}
@@ -114,7 +116,7 @@ export const Header: React.FC = () => {
           {/* Mobile Menu Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 rounded-lg text-[#F7E7A9] hover:bg-white/10 transition-colors border border-[#D4AF37]/30"
+            className="md:hidden min-w-[44px] min-h-[44px] p-2.5 rounded-xl text-[#F7E7A9] hover:bg-white/10 transition-colors border border-[#D4AF37]/30 flex items-center justify-center"
             aria-label="Toggle navigation menu"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <MenuIcon className="w-5 h-5" />}
@@ -124,14 +126,14 @@ export const Header: React.FC = () => {
 
       {/* Mobile Drawer Menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-[#D4AF37]/20 bg-[#1A0A06] px-4 py-3 space-y-2">
+        <div className="md:hidden border-t border-[#D4AF37]/20 bg-[#1A0A06] px-4 py-3 space-y-1.5 animate-fadeIn">
           {navLinks.map((link) => {
             const isActive = activeView === link.view;
             return (
               <button
                 key={link.view}
                 onClick={() => handleNavClick(link.view)}
-                className={`w-full text-left py-2.5 px-3 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between ${
+                className={`w-full min-h-[44px] text-left py-2.5 px-3.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between ${
                   isActive
                     ? 'bg-[#D4AF37]/20 text-[#F7E7A9] border border-[#D4AF37]/40'
                     : 'text-[#FFF5E1]/80 hover:bg-white/5'
@@ -142,6 +144,22 @@ export const Header: React.FC = () => {
               </button>
             );
           })}
+
+          {/* Quick Staff & Owner Navigation inside Mobile Menu */}
+          <div className="pt-2 mt-2 border-t border-[#D4AF37]/15 flex items-center gap-2">
+            <button
+              onClick={() => handleNavClick('cashier')}
+              className="flex-1 min-h-[44px] py-2 px-3 rounded-xl text-xs font-bold text-center bg-white/5 hover:bg-white/10 text-[#F7E7A9] border border-[#D4AF37]/30 transition-colors"
+            >
+              {t.cashierPortal}
+            </button>
+            <button
+              onClick={() => handleNavClick('owner')}
+              className="flex-1 min-h-[44px] py-2 px-3 rounded-xl text-xs font-bold text-center bg-white/5 hover:bg-white/10 text-[#F7E7A9] border border-[#D4AF37]/30 transition-colors"
+            >
+              {t.ownerPortal}
+            </button>
+          </div>
         </div>
       )}
     </header>

@@ -154,11 +154,11 @@ export const CheckoutModal: React.FC = () => {
   const finalTotal = cartTotal + deliveryFee;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="relative w-full max-w-lg bg-[#FFFBF5] rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+      <div className="relative w-full max-w-[95vw] sm:max-w-lg bg-[#FFFBF5] rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-4 sm:my-8">
         {/* Modal Header */}
         <div
-          className="p-5 flex items-center justify-between border-b text-white"
+          className="p-4 sm:p-5 flex items-center justify-between border-b text-white"
           style={{
             backgroundColor: 'var(--color-chocolate)',
             borderColor: 'rgba(212, 175, 55, 0.3)',
@@ -166,7 +166,7 @@ export const CheckoutModal: React.FC = () => {
         >
           <div>
             <h2
-              className="text-lg sm:text-xl font-bold text-[#FFF5E1]"
+              className="text-base sm:text-xl font-bold text-[#FFF5E1]"
               style={{ fontFamily: language === 'ar' ? "'Cairo', sans-serif" : "'Cinzel', serif" }}
             >
               {language === 'ar' ? 'استكمال وتأكيد الطلب' : 'Complete Your Order'}
@@ -178,7 +178,7 @@ export const CheckoutModal: React.FC = () => {
 
           <button
             onClick={() => setIsCheckoutOpen(false)}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+            className="p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -186,7 +186,7 @@ export const CheckoutModal: React.FC = () => {
         </div>
 
         {/* Modal Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-5 max-h-[80vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-4 sm:space-y-5 max-h-[85vh] overflow-y-auto">
           {/* 1. ORDER TYPE SELECTOR (Crucial requirement: 3 order types) */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-[#2B140E] uppercase tracking-wider block">

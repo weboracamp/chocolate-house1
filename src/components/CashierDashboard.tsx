@@ -456,11 +456,11 @@ export const CashierDashboard: React.FC = () => {
         </div>
 
         {/* Header Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap justify-end">
           {currentUser?.role === 'owner' && (
             <button
               onClick={() => setActiveView('owner')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold bg-[#FFFBF5]/10 text-[#F7E7A9] hover:bg-white/20 transition-colors border border-[#D4AF37]/30"
               title="Return to Owner Dashboard"
             >
               <span>{language === 'ar' ? 'لوحة المالك' : 'Owner Portal'}</span>
@@ -469,14 +469,14 @@ export const CashierDashboard: React.FC = () => {
 
           <button
             onClick={() => setActiveView('store')}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-[#F7E7A9] hover:bg-white/20 transition-colors"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold bg-white/10 text-[#F7E7A9] hover:bg-white/20 transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
             <span>{language === 'ar' ? 'المتجر العام' : 'Public Store'}</span>
           </button>
 
           {/* Active Staff Attribution Selector */}
-          <div className="flex items-center gap-1.5 bg-black/30 px-2.5 py-1.5 rounded-xl border border-[#D4AF37]/40">
+          <div className="flex items-center gap-1.5 bg-black/30 px-2 sm:px-2.5 py-1.5 rounded-xl border border-[#D4AF37]/40 min-h-[36px]">
             <UserCheck className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
             <div className="flex flex-col">
               <span className="text-[9px] text-[#F7E7A9]/70 uppercase font-semibold leading-none">
@@ -486,7 +486,7 @@ export const CashierDashboard: React.FC = () => {
                 id="cashier-header-staff-select"
                 value={activeStaffName}
                 onChange={(e) => handleSelectStaff(e.target.value)}
-                className="bg-transparent text-xs font-black text-white focus:outline-hidden cursor-pointer pr-3"
+                className="bg-transparent text-xs font-black text-white focus:outline-hidden cursor-pointer max-w-[90px] sm:max-w-[140px] truncate pr-1"
               >
                 {cashierStaffList.filter((s) => s.is_active !== false).map((staff) => (
                   <option key={staff.id} value={staff.name} className="text-[#2B140E] bg-white">
@@ -503,6 +503,7 @@ export const CashierDashboard: React.FC = () => {
               }}
               className="p-1 rounded-lg bg-white/10 hover:bg-white/25 text-[#D4AF37] transition-colors"
               title={language === 'ar' ? 'إضافة اسم موظف جديد' : 'Add Cashier Name'}
+              aria-label="Add Cashier Name"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -518,20 +519,22 @@ export const CashierDashboard: React.FC = () => {
               setShiftCompletedReport(null);
               setIsShiftModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all active:scale-95 text-[#1A0A06]"
+            className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 min-h-[36px] rounded-lg text-xs font-black shadow-md transition-all active:scale-95 text-[#1A0A06]"
             style={{
               background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
             }}
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>{t.endShiftReset}</span>
+            <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">{t.endShiftReset}</span>
+            <span className="sm:hidden text-[11px]">{language === 'ar' ? 'إغلاق وردية' : 'Shift Close'}</span>
           </button>
 
           {/* Sign Out */}
           <button
             onClick={logout}
-            className="p-1.5 rounded-lg text-red-300 hover:text-white hover:bg-red-900/30 transition-colors"
+            className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-red-300 hover:text-white hover:bg-red-900/30 transition-colors"
             title={t.logout}
+            aria-label="Log out"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -633,8 +636,8 @@ export const CashierDashboard: React.FC = () => {
         </div>
 
         {/* TAB CONTROLS */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#D4AF37]/30 pb-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-[#D4AF37]/30 pb-3">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap py-1">
             {/* 1. POS New Order Tab */}
             <button
               onClick={() => setActiveTab('pos')}
@@ -1064,7 +1067,7 @@ export const CashierDashboard: React.FC = () => {
                 )}
 
                 {/* Customer Details */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-gray-600 block mb-1">
                       {language === 'ar' ? 'اسم العميل' : 'Customer Name'}
@@ -1561,8 +1564,8 @@ export const CashierDashboard: React.FC = () => {
 
       {/* MODAL 1: ADD EXPENSE */}
       {isExpenseModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             <h3
               className="text-lg font-bold text-[#2B140E]"
               style={{ fontFamily: language === 'ar' ? "'Cairo', sans-serif" : "'Cinzel', serif" }}
@@ -1585,7 +1588,7 @@ export const CashierDashboard: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[#2B140E] block mb-1">
                     {t.expenseCategory}
@@ -1656,8 +1659,8 @@ export const CashierDashboard: React.FC = () => {
 
       {/* MODAL 2: STRICT END SHIFT RECONCILIATION PROMPT */}
       {isShiftModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-5">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-5 max-h-[90vh] overflow-y-auto">
             {!shiftCompletedReport ? (
               <form onSubmit={handleEndShiftSubmit} className="space-y-4">
                 <div className="flex items-center gap-3">
@@ -1863,8 +1866,8 @@ export const CashierDashboard: React.FC = () => {
 
       {/* MODAL 4: QUICK ADD CASHIER STAFF */}
       {isAddStaffModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4">
+          <div className="w-full max-w-[95vw] sm:max-w-sm bg-white rounded-3xl p-4 sm:p-6 shadow-2xl border border-[#D4AF37]/40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 rounded-lg bg-[#2B140E] text-[#D4AF37]">

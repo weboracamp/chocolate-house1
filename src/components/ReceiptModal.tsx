@@ -52,14 +52,14 @@ export const ReceiptModal: React.FC = () => {
   return (
     <div
       id="thermal-receipt-modal"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 no-print"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 no-print"
     >
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-8 no-print-chrome">
+      <div className="relative w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-4 sm:my-8 no-print-chrome max-h-[92vh] flex flex-col">
         {/* Top bar (Hidden when printing via .print:hidden) */}
-        <div className="p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden">
+        <div className="p-3.5 sm:p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden shrink-0">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-[#D4AF37]" />
-            <span className="font-bold text-sm text-[#F7E7A9]">
+            <span className="font-bold text-xs sm:text-sm text-[#F7E7A9]">
               {t.orderSuccessTitle}
             </span>
           </div>
@@ -67,14 +67,15 @@ export const ReceiptModal: React.FC = () => {
             <button
               onClick={handlePrint}
               id="print-receipt-btn"
-              className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A0A06] font-bold text-xs flex items-center gap-1.5 hover:bg-[#F7E7A9] transition-colors shadow-xs active:scale-95"
+              className="px-3 py-1.5 min-h-[36px] rounded-lg bg-[#D4AF37] text-[#1A0A06] font-bold text-xs flex items-center gap-1.5 hover:bg-[#F7E7A9] transition-colors shadow-xs active:scale-95"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>{t.printReceipt}</span>
             </button>
             <button
               onClick={() => setActiveReceiptOrder(null)}
-              className="p-1.5 rounded-full bg-white/10 text-white hover:bg-white/20"
+              className="p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+              aria-label="Close receipt"
             >
               <X className="w-5 h-5" />
             </button>
@@ -84,20 +85,20 @@ export const ReceiptModal: React.FC = () => {
         {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
         <div
           id="thermal-receipt-content"
-          className="receipt-print-area p-6 text-black bg-white font-mono text-xs space-y-4"
+          className="receipt-print-area p-4 sm:p-6 text-black bg-white font-mono text-xs space-y-4 overflow-y-auto"
         >
           {/* Receipt Header */}
           <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">
             <div className="flex justify-center pb-1">
               <Logo size="sm" />
             </div>
-            <h1 className="text-base font-black tracking-wider uppercase">
+            <h1 className="text-sm sm:text-base font-black tracking-wider uppercase">
               Chocolate House - شوكلت هاوس
             </h1>
             <p className="text-[10px] text-gray-700">
               Salah Salem ST, Al Hawamdeya Giza
             </p>
-            <p className="text-[10px] text-gray-700">
+            <p className="text-[10px] text-gray-700 break-words">
               Tel: 01112437437 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
             </p>
             <div className="pt-2 text-xs font-bold">

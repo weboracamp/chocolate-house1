@@ -52,11 +52,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ requiredRole }) => {
       <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full bg-[#D4AF37]/10 blur-3xl" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-[#2B140E]/50 blur-3xl" />
 
-      <div className="relative w-full max-w-md bg-[#2B140E] rounded-3xl border border-[#D4AF37]/40 shadow-2xl p-6 sm:p-8 space-y-6 text-[#FFF5E1]">
+      <div className="relative w-full max-w-[95vw] sm:max-w-md bg-[#2B140E] rounded-3xl border border-[#D4AF37]/40 shadow-2xl p-5 sm:p-8 space-y-5 sm:space-y-6 text-[#FFF5E1]">
         {/* Back to Public Menu Button */}
         <button
           onClick={() => setActiveView('store')}
-          className="inline-flex items-center gap-1.5 text-xs text-[#F7E7A9]/80 hover:text-white transition-colors"
+          className="inline-flex items-center gap-1.5 min-h-[36px] text-xs text-[#F7E7A9]/80 hover:text-white transition-colors"
         >
           <ArrowLeft className={`w-4 h-4 ${language === 'ar' ? 'rotate-180' : ''}`} />
           <span>{t.continueShopping}</span>
