@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-chocolate: #2b140e;
+    --color-chocolate-dark: #190a06;
+    --color-chocolate-light: #442217;
+    --color-chocolate-accent: #5e2f20;
+    --color-gold: #d4af37;
+    --color-gold-light: #f7e7a9;
+    --color-gold-dark: #b8911f;
+    --color-cream: #fffbf5;
+    --color-cream-card: #ffffff;
+    --color-cream-muted: #f4ecdf;
+    --color-cream-dark: #e8dccb;
+  }
+
+  body {
+    font-family: 'Outfit', 'Cairo', sans-serif;
+    background-color: var(--color-cream);
+    color: var(--color-chocolate);
+    overflow-x: hidden;
+  }
+
+  [dir="rtl"] body,
+  [dir="rtl"] {
+    font-family: 'Cairo', 'Outfit', sans-serif;
+  }
+}
+
+.font-serif-brand {
+  font-family: 'Playfair Display', 'Cinzel', serif;
+}
+
+.font-arabic-brand {
+  font-family: 'Cairo', sans-serif;
+}
+
+#receipt-print-root {
+  display: none;
+}
+
+/* Custom scrollbar for modern cafe luxury feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-cream-muted);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-gold-dark);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gold);
+}
+
+/* ==============================================================================
+   80mm THERMAL RECEIPT PRINT
+   Clone of .receipt-print-area is attached to body as #receipt-print-root.
+   Everything else is display:none so it cannot occupy pages.
+   Do NOT use visibility:hidden (still takes layout space) or page-break-inside
+   on nested receipt blocks (pushes later sections onto extra pages).
+   ============================================================================== */
+@media print {
+  /* `80mm auto` is invalid (auto is not a length) and Chrome drops it → A4. */
+  @page {
+    size: 80mm 297mm;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body > *:not(#receipt-print-root) {
+    display: none !important;
+  }
+
+  #receipt-print-root {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  #receipt-print-root .receipt-print-area,
+  #receipt-print-root #thermal-receipt-content {
+    display: block !important;
+    position: static !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 3mm 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    page-break-before: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  #receipt-print-root img {
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  .print\:hidden,
+  .no-print {
+    display: none !important;
+  }
+}
+
