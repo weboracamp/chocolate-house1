@@ -26,7 +26,7 @@ import { INITIAL_FEATURES } from '../data/features';
 import { INITIAL_SITE_CONFIG, INITIAL_TESTIMONIALS, INITIAL_FAQS } from '../data/siteConfig';
 import { translations } from '../lib/i18n';
 import { supabase } from '../lib/supabase';
-import { isProductSizeEnabled } from '../utils/productSizes';
+import { isProductSizeEnabled, isPancakesCategory } from '../utils/productSizes';
 import {
   cachedSupabaseQuery,
   cachedSupabaseMutations,
@@ -167,6 +167,13 @@ const REALTIME_TABLES = [
 ] as const;
 
 function normalizeProductRow(row: any): Product {
+  const hasMultiple = Boolean(row.has_multiple_sizes ?? row.has_sizes);
+  const sizeType = row.size_type || row.size_label_type || undefined;
+  const isPieces =
+    sizeType === 'pieces' ||
+    sizeType === 'pancake_pieces' ||
+    isPancakesCategory(row.category);
+
   return {
     id: row.id,
     name_en: row.name_en,
@@ -180,10 +187,14 @@ function normalizeProductRow(row: any): Product {
     image: row.image,
     is_best_seller: Boolean(row.is_best_seller),
     is_new: Boolean(row.is_new),
-    has_sizes: Boolean(row.has_sizes),
+    has_multiple_sizes: hasMultiple,
+    has_sizes: hasMultiple,
     price_small: row.price_small != null ? Number(row.price_small) : undefined,
     price_large: row.price_large != null ? Number(row.price_large) : undefined,
-    size_label_type: row.size_label_type || undefined,
+    size_label_small: row.size_label_small || (hasMultiple ? (isPieces ? '12 Pieces' : 'Small') : undefined),
+    size_label_large: row.size_label_large || (hasMultiple ? (isPieces ? '26 Pieces' : 'Large') : undefined),
+    size_type: sizeType || (hasMultiple ? (isPieces ? 'pieces' : 'standard') : undefined),
+    size_label_type: isPieces ? 'pancake_pieces' : 'standard',
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -1039,13 +1050,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addProduct = async (newProd: Omit<Product, 'id'>): Promise<boolean> => {
     const newId = `prod-${Date.now()}`;
     const now = new Date().toISOString();
+    const hasMultiple = Boolean(newProd.has_multiple_sizes ?? newProd.has_sizes);
+    const rawType = newProd.size_type || newProd.size_label_type;
+    const isPieces = rawType === 'pieces' || rawType === 'pancake_pieces' || isPancakesCategory(newProd.category);
+    const sizeType = hasMultiple ? (isPieces ? 'pieces' : 'standard') : null;
+    const sizeLabelSmall = hasMultiple ? (newProd.size_label_small || (isPieces ? '12 Pieces' : 'Small')) : null;
+    const sizeLabelLarge = hasMultiple ? (newProd.size_label_large || (isPieces ? '26 Pieces' : 'Large')) : null;
+    const priceSmall =
+      hasMultiple && newProd.price_small != null && !isNaN(Number(newProd.price_small))
+        ? Number(newProd.price_small)
+        : null;
+    const priceLarge =
+      hasMultiple && newProd.price_large != null && !isNaN(Number(newProd.price_large))
+        ? Number(newProd.price_large)
+        : null;
+
     const product: Product = {
       ...newProd,
       id: newId,
-      has_sizes: Boolean(newProd.has_sizes),
-      price_small: newProd.price_small != null ? Number(newProd.price_small) : undefined,
-      price_large: newProd.price_large != null ? Number(newProd.price_large) : undefined,
-      size_label_type: newProd.size_label_type || undefined,
+      has_multiple_sizes: hasMultiple,
+      has_sizes: hasMultiple,
+      price_small: priceSmall != null ? priceSmall : undefined,
+      price_large: priceLarge != null ? priceLarge : undefined,
+      size_label_small: sizeLabelSmall || undefined,
+      size_label_large: sizeLabelLarge || undefined,
+      size_type: sizeType || undefined,
+      size_label_type: isPieces ? 'pancake_pieces' : 'standard',
       created_at: now,
       updated_at: now,
     };
@@ -1065,32 +1095,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           image: product.image,
           is_best_seller: Boolean(product.is_best_seller),
           is_new: Boolean(product.is_new),
-          has_sizes: Boolean(product.has_sizes),
-          price_small: product.price_small != null ? product.price_small : null,
-          price_large: product.price_large != null ? product.price_large : null,
-          size_label_type: product.size_label_type || null,
+          has_multiple_sizes: hasMultiple,
+          price_small: priceSmall,
+          price_large: priceLarge,
+          size_label_small: sizeLabelSmall,
+          size_label_large: sizeLabelLarge,
+          size_type: sizeType,
           created_at: now,
           updated_at: now,
         };
 
-        let { data, error } = await supabase
+        const { data, error } = await supabase
           .from('products')
           .insert(insertPayload)
           .select()
           .single();
-
-        // Safe fallback if the database has not yet been migrated with new columns
-        if (error && (error.message.includes('has_sizes') || error.message.includes('column'))) {
-          console.warn('[StoreContext] Retrying insert without size columns for backwards compatibility...');
-          const fallbackPayload = { ...insertPayload };
-          delete fallbackPayload.has_sizes;
-          delete fallbackPayload.price_small;
-          delete fallbackPayload.price_large;
-          delete fallbackPayload.size_label_type;
-          const retry = await supabase.from('products').insert(fallbackPayload).select().single();
-          data = retry.data;
-          error = retry.error;
-        }
 
         if (error) {
           console.error('[StoreContext] Supabase insert product error:', error);
@@ -1104,15 +1123,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (data) {
-          const merged: Product = {
-            ...product,
-            ...(data as Product),
-            has_sizes: product.has_sizes,
-            price_small: product.price_small,
-            price_large: product.price_large,
-            size_label_type: product.size_label_type,
-          };
-          setProducts((prev) => [merged, ...prev]);
+          const normalized = normalizeProductRow(data);
+          setProducts((prev) => [normalized, ...prev]);
           invalidateCache('products');
           showToast(language === 'ar' ? 'تمت إضافة الصنف بنجاح' : 'Product added successfully', 'success');
           return true;
@@ -1140,25 +1152,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           payload.discount_price = null;
         }
 
-        let { data, error } = await supabase
+        // Determine multiple sizes state
+        const hasMultiple =
+          updates.has_multiple_sizes !== undefined
+            ? Boolean(updates.has_multiple_sizes)
+            : updates.has_sizes !== undefined
+            ? Boolean(updates.has_sizes)
+            : undefined;
+
+        if (hasMultiple !== undefined) {
+          payload.has_multiple_sizes = hasMultiple;
+          if (hasMultiple) {
+            const rawType = updates.size_type || updates.size_label_type;
+            const isPieces =
+              rawType === 'pieces' ||
+              rawType === 'pancake_pieces' ||
+              (updates.category && isPancakesCategory(updates.category));
+
+            payload.price_small =
+              updates.price_small != null && !isNaN(Number(updates.price_small))
+                ? Number(updates.price_small)
+                : null;
+            payload.price_large =
+              updates.price_large != null && !isNaN(Number(updates.price_large))
+                ? Number(updates.price_large)
+                : null;
+            payload.size_type = isPieces ? 'pieces' : 'standard';
+            payload.size_label_small = updates.size_label_small || (isPieces ? '12 Pieces' : 'Small');
+            payload.size_label_large = updates.size_label_large || (isPieces ? '26 Pieces' : 'Large');
+          } else {
+            payload.price_small = null;
+            payload.price_large = null;
+            payload.size_label_small = null;
+            payload.size_label_large = null;
+            payload.size_type = null;
+          }
+        }
+
+        // Strip non-column helper properties before sending to Supabase
+        delete payload.has_sizes;
+        delete payload.size_label_type;
+
+        const { data, error } = await supabase
           .from('products')
           .update(payload)
           .eq('id', id)
           .select()
           .single();
-
-        // Safe fallback if database table lacks new columns
-        if (error && (error.message.includes('has_sizes') || error.message.includes('column'))) {
-          console.warn('[StoreContext] Retrying update without size columns for backwards compatibility...');
-          const fallbackPayload = { ...payload };
-          delete fallbackPayload.has_sizes;
-          delete fallbackPayload.price_small;
-          delete fallbackPayload.price_large;
-          delete fallbackPayload.size_label_type;
-          const retry = await supabase.from('products').update(fallbackPayload).eq('id', id).select().single();
-          data = retry.data;
-          error = retry.error;
-        }
 
         if (error) {
           console.error('[StoreContext] Supabase update product error:', error);
@@ -1171,13 +1211,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return false;
         }
 
+        const normalizedUpdated = data ? normalizeProductRow(data) : null;
+
         setProducts((prev) =>
           prev.map((p) => {
             if (p.id === id) {
               return {
                 ...p,
-                ...(data as Product || {}),
+                ...(normalizedUpdated || {}),
                 ...updates,
+                has_multiple_sizes: hasMultiple !== undefined ? hasMultiple : p.has_multiple_sizes,
+                has_sizes: hasMultiple !== undefined ? hasMultiple : p.has_sizes,
                 updated_at: now,
               };
             }

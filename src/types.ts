@@ -44,9 +44,13 @@ export interface Product {
   is_best_seller?: boolean;
   is_new?: boolean;
   calories?: number;
+  has_multiple_sizes?: boolean;
   has_sizes?: boolean;
   price_small?: number;
   price_large?: number;
+  size_label_small?: string;
+  size_label_large?: string;
+  size_type?: string;
   size_label_type?: SizeLabelType;
   created_at?: string;
   updated_at?: string;

@@ -250,10 +250,15 @@ export const OwnerDashboard: React.FC = () => {
     setFormStock(p.stock.toString());
     setFormImage(p.image);
     setFormIsBestSeller(Boolean(p.is_best_seller));
-    setFormHasSizes(Boolean(p.has_sizes));
+    const hasMultiple = Boolean(p.has_multiple_sizes || p.has_sizes);
+    setFormHasSizes(hasMultiple);
     setFormPriceSmall(p.price_small != null ? p.price_small.toString() : '');
     setFormPriceLarge(p.price_large != null ? p.price_large.toString() : '');
-    setFormSizeLabelType(p.size_label_type || (isPancakesCategory(p.category) ? 'pancake_pieces' : 'standard'));
+    const isPieces =
+      p.size_type === 'pieces' ||
+      p.size_label_type === 'pancake_pieces' ||
+      isPancakesCategory(p.category);
+    setFormSizeLabelType(isPieces ? 'pancake_pieces' : 'standard');
     setUploadError(null);
     setShowUrlInput(false);
     setIsUploadingImage(false);
@@ -363,45 +368,39 @@ export const OwnerDashboard: React.FC = () => {
 
     const priceSmall = formHasSizes ? (parseFloat(formPriceSmall) || price) : undefined;
     const priceLarge = formHasSizes ? (parseFloat(formPriceLarge) || price) : undefined;
-    const sizeLabelType = formHasSizes ? formSizeLabelType : undefined;
+    const isPieces = formSizeLabelType === 'pancake_pieces' || isPancakesCategory(formCategory);
+    const sizeType = formHasSizes ? (isPieces ? 'pieces' : 'standard') : undefined;
+    const sizeLabelSmall = formHasSizes ? (isPieces ? '12 Pieces' : 'Small') : undefined;
+    const sizeLabelLarge = formHasSizes ? (isPieces ? '26 Pieces' : 'Large') : undefined;
 
     setIsSavingProduct(true);
     let success = false;
     try {
+      const productPayload = {
+        name_en: formNameEn.trim(),
+        name_ar: formNameAr.trim(),
+        description_en: formDescEn.trim(),
+        description_ar: formDescAr.trim(),
+        price,
+        discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
+        category: formCategory,
+        stock,
+        image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
+        is_best_seller: formIsBestSeller,
+        has_multiple_sizes: formHasSizes,
+        has_sizes: formHasSizes,
+        price_small: priceSmall,
+        price_large: priceLarge,
+        size_label_small: sizeLabelSmall,
+        size_label_large: sizeLabelLarge,
+        size_type: sizeType,
+        size_label_type: isPieces ? 'pancake_pieces' : 'standard',
+      };
+
       if (editingProduct) {
-        success = await updateProduct(editingProduct.id, {
-          name_en: formNameEn.trim(),
-          name_ar: formNameAr.trim(),
-          description_en: formDescEn.trim(),
-          description_ar: formDescAr.trim(),
-          price,
-          discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
-          category: formCategory,
-          stock,
-          image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
-          is_best_seller: formIsBestSeller,
-          has_sizes: formHasSizes,
-          price_small: priceSmall,
-          price_large: priceLarge,
-          size_label_type: sizeLabelType,
-        });
+        success = await updateProduct(editingProduct.id, productPayload);
       } else {
-        success = await addProduct({
-          name_en: formNameEn.trim(),
-          name_ar: formNameAr.trim(),
-          description_en: formDescEn.trim(),
-          description_ar: formDescAr.trim(),
-          price,
-          discount_price: discountPrice && discountPrice < price ? discountPrice : undefined,
-          category: formCategory,
-          stock,
-          image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
-          is_best_seller: formIsBestSeller,
-          has_sizes: formHasSizes,
-          price_small: priceSmall,
-          price_large: priceLarge,
-          size_label_type: sizeLabelType,
-        });
+        success = await addProduct(productPayload);
       }
     } catch (err) {
       console.error('Save product error:', err);
@@ -996,15 +995,15 @@ export const OwnerDashboard: React.FC = () => {
                             {p.category}
                           </td>
                           <td className="p-3.5">
-                            {p.has_sizes ? (
+                            {p.has_multiple_sizes || p.has_sizes ? (
                               <div>
                                 <span className="font-bold text-[#2B140E] text-xs">
                                   {p.price_small} / {p.price_large} EGP
                                 </span>
                                 <span className="text-[10px] text-[#8C6212] font-semibold block">
-                                  {p.size_label_type === 'pancake_pieces' || isPancakesCategory(p.category)
-                                    ? '12pc / 26pc'
-                                    : 'Small / Large'}
+                                  {p.size_type === 'pieces' || p.size_label_type === 'pancake_pieces' || isPancakesCategory(p.category)
+                                    ? (p.size_label_small && p.size_label_large ? `${p.size_label_small} / ${p.size_label_large}` : '12pc / 26pc')
+                                    : (p.size_label_small && p.size_label_large ? `${p.size_label_small} / ${p.size_label_large}` : 'Small / Large')}
                                 </span>
                               </div>
                             ) : hasDiscount ? (
