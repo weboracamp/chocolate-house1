@@ -26,6 +26,7 @@ import { INITIAL_FEATURES } from '../data/features';
 import { INITIAL_SITE_CONFIG, INITIAL_TESTIMONIALS, INITIAL_FAQS } from '../data/siteConfig';
 import { translations } from '../lib/i18n';
 import { supabase } from '../lib/supabase';
+import { isProductSizeEnabled } from '../utils/productSizes';
 import {
   cachedSupabaseQuery,
   cachedSupabaseMutations,
@@ -82,7 +83,7 @@ interface StoreContextType {
   
   // Cart
   cart: CartItem[];
-  addToCart: (product: Product, quantity?: number, selectedAddons?: SelectedAddon[]) => boolean;
+  addToCart: (product: Product, quantity?: number, selectedAddons?: SelectedAddon[], selectedSize?: 'small' | 'large') => boolean;
   removeFromCart: (cartItemIdOrProdId: string) => void;
   updateCartQuantity: (cartItemIdOrProdId: string, quantity: number) => void;
   clearCart: () => void;
@@ -179,6 +180,10 @@ function normalizeProductRow(row: any): Product {
     image: row.image,
     is_best_seller: Boolean(row.is_best_seller),
     is_new: Boolean(row.is_new),
+    has_sizes: Boolean(row.has_sizes),
+    price_small: row.price_small != null ? Number(row.price_small) : undefined,
+    price_large: row.price_large != null ? Number(row.price_large) : undefined,
+    size_label_type: row.size_label_type || undefined,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -235,6 +240,7 @@ function assembleOrders(ordersData: any[], itemsData: any[] | null): Order[] {
       created_at: ord.created_at,
       shift_id: ord.shift_id || undefined,
       is_archived: Boolean(ord.is_archived),
+      stock_restored: ord.stock_restored != null ? Boolean(ord.stock_restored) : ord.status === 'cancelled',
     };
   });
 }
@@ -1036,32 +1042,55 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const product: Product = {
       ...newProd,
       id: newId,
+      has_sizes: Boolean(newProd.has_sizes),
+      price_small: newProd.price_small != null ? Number(newProd.price_small) : undefined,
+      price_large: newProd.price_large != null ? Number(newProd.price_large) : undefined,
+      size_label_type: newProd.size_label_type || undefined,
       created_at: now,
       updated_at: now,
     };
 
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        const insertPayload: Record<string, any> = {
+          id: product.id,
+          name_en: product.name_en,
+          name_ar: product.name_ar,
+          description_en: product.description_en || '',
+          description_ar: product.description_ar || '',
+          price: product.price,
+          discount_price: product.discount_price || null,
+          category: product.category,
+          stock: product.stock,
+          image: product.image,
+          is_best_seller: Boolean(product.is_best_seller),
+          is_new: Boolean(product.is_new),
+          has_sizes: Boolean(product.has_sizes),
+          price_small: product.price_small != null ? product.price_small : null,
+          price_large: product.price_large != null ? product.price_large : null,
+          size_label_type: product.size_label_type || null,
+          created_at: now,
+          updated_at: now,
+        };
+
+        let { data, error } = await supabase
           .from('products')
-          .insert({
-            id: product.id,
-            name_en: product.name_en,
-            name_ar: product.name_ar,
-            description_en: product.description_en || '',
-            description_ar: product.description_ar || '',
-            price: product.price,
-            discount_price: product.discount_price || null,
-            category: product.category,
-            stock: product.stock,
-            image: product.image,
-            is_best_seller: Boolean(product.is_best_seller),
-            is_new: Boolean(product.is_new),
-            created_at: now,
-            updated_at: now,
-          })
+          .insert(insertPayload)
           .select()
           .single();
+
+        // Safe fallback if the database has not yet been migrated with new columns
+        if (error && (error.message.includes('has_sizes') || error.message.includes('column'))) {
+          console.warn('[StoreContext] Retrying insert without size columns for backwards compatibility...');
+          const fallbackPayload = { ...insertPayload };
+          delete fallbackPayload.has_sizes;
+          delete fallbackPayload.price_small;
+          delete fallbackPayload.price_large;
+          delete fallbackPayload.size_label_type;
+          const retry = await supabase.from('products').insert(fallbackPayload).select().single();
+          data = retry.data;
+          error = retry.error;
+        }
 
         if (error) {
           console.error('[StoreContext] Supabase insert product error:', error);
@@ -1075,7 +1104,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (data) {
-          setProducts((prev) => [data as Product, ...prev]);
+          const merged: Product = {
+            ...product,
+            ...(data as Product),
+            has_sizes: product.has_sizes,
+            price_small: product.price_small,
+            price_large: product.price_large,
+            size_label_type: product.size_label_type,
+          };
+          setProducts((prev) => [merged, ...prev]);
           invalidateCache('products');
           showToast(language === 'ar' ? 'تمت إضافة الصنف بنجاح' : 'Product added successfully', 'success');
           return true;
@@ -1103,12 +1140,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           payload.discount_price = null;
         }
 
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('products')
           .update(payload)
           .eq('id', id)
           .select()
           .single();
+
+        // Safe fallback if database table lacks new columns
+        if (error && (error.message.includes('has_sizes') || error.message.includes('column'))) {
+          console.warn('[StoreContext] Retrying update without size columns for backwards compatibility...');
+          const fallbackPayload = { ...payload };
+          delete fallbackPayload.has_sizes;
+          delete fallbackPayload.price_small;
+          delete fallbackPayload.price_large;
+          delete fallbackPayload.size_label_type;
+          const retry = await supabase.from('products').update(fallbackPayload).eq('id', id).select().single();
+          data = retry.data;
+          error = retry.error;
+        }
 
         if (error) {
           console.error('[StoreContext] Supabase update product error:', error);
@@ -1122,7 +1172,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         setProducts((prev) =>
-          prev.map((p) => (p.id === id ? ((data as Product) || { ...p, ...updates, updated_at: now }) : p))
+          prev.map((p) => {
+            if (p.id === id) {
+              return {
+                ...p,
+                ...(data as Product || {}),
+                ...updates,
+                updated_at: now,
+              };
+            }
+            return p;
+          })
         );
         invalidateCache('products');
         showToast(language === 'ar' ? 'تم تحديث بيانات الصنف بنجاح' : 'Product updated successfully', 'success');
@@ -1272,19 +1332,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
-  const addToCart = (product: Product, quantity = 1, selectedAddons: SelectedAddon[] = []): boolean => {
+  const addToCart = (
+    product: Product,
+    quantity = 1,
+    selectedAddons: SelectedAddon[] = [],
+    selectedSize?: 'small' | 'large'
+  ): boolean => {
     const currentProduct = products.find((p) => p.id === product.id) || product;
     if (currentProduct.stock <= 0) {
       showToast(language === 'ar' ? 'عذراً، هذا الصنف غير متوفر حالياً' : 'Sorry, this item is sold out', 'error');
       return false;
     }
 
-    const basePrice = product.discount_price ?? product.price;
+    // Determine if sizes are enabled on this product
+    const hasSizes = isProductSizeEnabled(currentProduct) || isProductSizeEnabled(product);
+    let effectiveSize: 'small' | 'large' | undefined = undefined;
+
+    if (hasSizes) {
+      if (selectedSize) {
+        effectiveSize = selectedSize;
+      } else {
+        // Check if an existing size addon was included
+        const sizeAddon = selectedAddons.find(
+          (a) => a.category === 'size' || a.id.startsWith('size_')
+        );
+        if (sizeAddon) {
+          effectiveSize = sizeAddon.id.includes('large') ? 'large' : 'small';
+        } else {
+          effectiveSize = 'small'; // Safe default
+        }
+      }
+    }
+
+    let basePrice: number;
+    if (hasSizes && effectiveSize) {
+      basePrice = effectiveSize === 'large'
+        ? (Number(currentProduct.price_large) || currentProduct.price)
+        : (Number(currentProduct.price_small) || currentProduct.price);
+    } else {
+      basePrice = currentProduct.discount_price ?? currentProduct.price;
+    }
+
     const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
     const unitPrice = basePrice + addonTotal;
 
     const addonKey = selectedAddons.map((a) => a.id).sort().join('_');
-    const cartItemId = `${product.id}_${addonKey}`;
+    const sizeKey = effectiveSize ? `_sz-${effectiveSize}` : '';
+    const cartItemId = `${product.id}${sizeKey}_${addonKey}`;
 
     const existing = cart.find((item) => (item.cart_item_id || item.product_id) === cartItemId);
     const currentQty = existing ? existing.quantity : 0;
@@ -1307,8 +1401,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? {
                 ...item,
                 quantity: newQty,
+                unit_price: unitPrice,
                 total_price: newQty * unitPrice,
-                stock: product.stock,
+                stock: currentProduct.stock,
               }
             : item
         )
@@ -1323,9 +1418,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         unit_price: unitPrice,
         addon_total: addonTotal,
         selected_addons: selectedAddons,
+        selected_size: effectiveSize,
         total_price: quantity * unitPrice,
         image: product.image,
-        stock: product.stock,
+        stock: currentProduct.stock,
       };
       setCart((prev) => [...prev, newItem]);
     }
@@ -1460,11 +1556,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // 2. Auto-decrement stock in database / state
     setProducts((prev) =>
       prev.map((prod) => {
-        const orderItem = orderData.items.find((i) => i.product_id === prod.id);
-        if (orderItem) {
+        const matchingItems = orderData.items.filter((i) => i.product_id === prod.id);
+        const totalQty = matchingItems.reduce((acc, curr) => acc + curr.quantity, 0);
+        if (totalQty > 0) {
+          const newStock = Math.max(0, prod.stock - totalQty);
+          if (supabase) {
+            supabase
+              .from('products')
+              .update({ stock: newStock })
+              .eq('id', prod.id)
+              .then(({ error }) => {
+                if (error) console.warn(`Failed to decrement stock for product ${prod.id} in Supabase:`, error);
+              });
+          }
           return {
             ...prod,
-            stock: Math.max(0, prod.stock - orderItem.quantity),
+            stock: newStock,
           };
         }
         return prod;
@@ -1566,7 +1673,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newOrder;
   };
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus) => {
+  const updateOrderStatus = async (orderId: string, status: OrderStatus) => {
     const targetOrder = orders.find((o) => o.id === orderId);
 
     if (targetOrder && targetOrder.status !== status) {
@@ -1574,14 +1681,48 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const isNowCancelled = status === 'cancelled';
       const wasRestored = Boolean(targetOrder.stock_restored);
 
+      // If items list in memory is empty, try to fetch from Supabase to guarantee accurate stock restore
+      let orderItems = targetOrder.items || [];
+      if (orderItems.length === 0 && supabase) {
+        try {
+          const { data: fetchedItems } = await supabase
+            .from('order_items')
+            .select('*')
+            .eq('order_id', orderId);
+          if (fetchedItems && fetchedItems.length > 0) {
+            orderItems = fetchedItems.map((fi: any) => ({
+              product_id: fi.product_id || '',
+              product_name_en: fi.product_name_en,
+              product_name_ar: fi.product_name_ar,
+              quantity: Number(fi.quantity) || 1,
+              unit_price: Number(fi.unit_price) || 0,
+              total_price: Number(fi.total_price) || 0,
+            }));
+          }
+        } catch (err) {
+          console.warn('Could not fetch order items for stock restoration:', err);
+        }
+      }
+
       // 1. If cancelling an active order and stock hasn't been restored yet:
-      // Increment product stock by item quantity
+      // Increment product stock by all matching item quantities
       if (isNowCancelled && !wasRestored) {
         setProducts((prev) =>
           prev.map((prod) => {
-            const item = targetOrder.items?.find((i) => i.product_id === prod.id);
-            if (item) {
-              return { ...prod, stock: prod.stock + item.quantity };
+            const matchingItems = orderItems.filter((i) => i.product_id === prod.id);
+            const totalQtyToRestore = matchingItems.reduce((sum, i) => sum + i.quantity, 0);
+            if (totalQtyToRestore > 0) {
+              const newStock = prod.stock + totalQtyToRestore;
+              if (supabase) {
+                supabase
+                  .from('products')
+                  .update({ stock: newStock })
+                  .eq('id', prod.id)
+                  .then(({ error }) => {
+                    if (error) console.warn(`Failed to restore product stock for ${prod.id} in Supabase:`, error);
+                  });
+              }
+              return { ...prod, stock: newStock };
             }
             return prod;
           })
@@ -1589,13 +1730,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         invalidateCache('products');
       }
       // 2. If un-cancelling an order back to active and stock was previously restored:
-      // Re-decrement product stock by item quantity
+      // Re-decrement product stock by all matching item quantities
       else if (wasCancelled && !isNowCancelled && wasRestored) {
         setProducts((prev) =>
           prev.map((prod) => {
-            const item = targetOrder.items?.find((i) => i.product_id === prod.id);
-            if (item) {
-              return { ...prod, stock: Math.max(0, prod.stock - item.quantity) };
+            const matchingItems = orderItems.filter((i) => i.product_id === prod.id);
+            const totalQtyToDeduct = matchingItems.reduce((sum, i) => sum + i.quantity, 0);
+            if (totalQtyToDeduct > 0) {
+              const newStock = Math.max(0, prod.stock - totalQtyToDeduct);
+              if (supabase) {
+                supabase
+                  .from('products')
+                  .update({ stock: newStock })
+                  .eq('id', prod.id)
+                  .then(({ error }) => {
+                    if (error) console.warn(`Failed to re-deduct product stock for ${prod.id} in Supabase:`, error);
+                  });
+              }
+              return { ...prod, stock: newStock };
             }
             return prod;
           })
@@ -1603,39 +1755,58 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         invalidateCache('products');
       }
 
+      let nextStockRestored = targetOrder.stock_restored;
+      if (isNowCancelled && !wasRestored) nextStockRestored = true;
+      if (wasCancelled && !isNowCancelled && wasRestored) nextStockRestored = false;
+
       setOrders((prev) =>
         prev.map((o) => {
           if (o.id === orderId) {
-            let nextStockRestored = o.stock_restored;
-            if (isNowCancelled && !wasRestored) nextStockRestored = true;
-            if (wasCancelled && !isNowCancelled && wasRestored) nextStockRestored = false;
-            return { ...o, status, stock_restored: nextStockRestored };
+            return { ...o, status, stock_restored: nextStockRestored, items: orderItems };
           }
           return o;
         })
       );
+
+      invalidateCache('orders');
+      if (supabase) {
+        supabase
+          .from('orders')
+          .update({ status, stock_restored: nextStockRestored })
+          .eq('id', orderId)
+          .then(({ error }) => {
+            if (error) {
+              // fallback in case stock_restored column does not exist on remote schema
+              supabase.from('orders').update({ status }).eq('id', orderId);
+            }
+          });
+      }
     } else {
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, status } : o))
       );
+      invalidateCache('orders');
+      if (supabase) {
+        supabase
+          .from('orders')
+          .update({ status })
+          .eq('id', orderId)
+          .then(({ error }) => {
+            if (error) console.warn('Failed to update order status in Supabase:', error);
+          });
+      }
     }
 
-    invalidateCache('orders');
-    if (supabase) {
-      supabase
-        .from('orders')
-        .update({ status })
-        .eq('id', orderId)
-        .then(({ error }) => {
-          if (error) console.warn('Failed to update order status in Supabase:', error);
-        });
-    }
-    showToast(
-      language === 'ar'
+    const toastMsg =
+      status === 'cancelled'
+        ? language === 'ar'
+          ? `تم إلغاء الطلب واسترجاع كميات المنتجات إلى المخزون بنجاح`
+          : `Order cancelled and product stock successfully restored`
+        : language === 'ar'
         ? `تم تحديث حالة الطلب إلى "${translations.ar[status]}"`
-        : `Order status updated to "${status}"`,
-      'info'
-    );
+        : `Order status updated to "${status}"`;
+
+    showToast(toastMsg, 'info');
   };
 
   // 6. Expenses State

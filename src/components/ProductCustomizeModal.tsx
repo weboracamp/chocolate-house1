@@ -2,14 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, SelectedAddon } from '../types';
 import { useStore } from '../context/StoreContext';
-import { X, Plus, Minus, Check, CupSoda, CheckCircle2 } from 'lucide-react';
+import { X, Plus, Minus, Check, CupSoda, CheckCircle2, Layers } from 'lucide-react';
+import {
+  isProductSizeEnabled,
+  getProductSizeLabels,
+  SizeKey,
+} from '../utils/productSizes';
 
 interface ProductCustomizeModalProps {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (product: Product, quantity: number, selectedAddons: SelectedAddon[]) => void;
+  onConfirm: (
+    product: Product,
+    quantity: number,
+    selectedAddons: SelectedAddon[],
+    selectedSize?: SizeKey
+  ) => void;
   confirmButtonText?: string;
+  initialSize?: SizeKey;
 }
 
 // 1. SIZE OPTIONS (ONLY for 'Iced coffee' category)
@@ -37,12 +48,16 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
   onClose,
   onConfirm,
   confirmButtonText,
+  initialSize = 'small',
 }) => {
   const { language, t } = useStore();
 
   const isIcedCoffee = product?.category === 'Iced coffee';
+  const hasSizes = product ? isProductSizeEnabled(product) : false;
+  const sizeLabels = product ? getProductSizeLabels(product) : null;
 
   // State
+  const [productSizeKey, setProductSizeKey] = useState<SizeKey>(initialSize);
   const [selectedSizeId, setSelectedSizeId] = useState<string>('size_cup');
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [quantity, setQuantity] = useState(1);
@@ -50,11 +65,12 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
   // Reset when a new product is selected
   useEffect(() => {
     if (isOpen) {
+      setProductSizeKey(initialSize || 'small');
       setSelectedSizeId('size_cup');
       setSelectedAddonIds([]);
       setQuantity(1);
     }
-  }, [isOpen, product?.id]);
+  }, [isOpen, initialSize, product?.id]);
 
   // Lock body scroll and handle Escape key dismissal
   useEffect(() => {
@@ -78,7 +94,11 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
 
   if (!isOpen || !product) return null;
 
-  const basePrice = product.discount_price ?? product.price;
+  const basePrice = hasSizes
+    ? (productSizeKey === 'large'
+        ? Number(product.price_large) || product.price
+        : Number(product.price_small) || product.price)
+    : (product.discount_price ?? product.price);
 
   // Toggle addon
   const toggleAddon = (id: string) => {
@@ -106,6 +126,19 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
   // Assemble SelectedAddon list
   const getSelectedAddonsList = (): SelectedAddon[] => {
     const list: SelectedAddon[] = [];
+
+    // Size or Pieces Choice
+    if (hasSizes && sizeLabels) {
+      const selectedSizeInfo = productSizeKey === 'large' ? sizeLabels.large : sizeLabels.small;
+      list.push({
+        id: `size_${productSizeKey}`,
+        name: language === 'ar' ? selectedSizeInfo.ar : selectedSizeInfo.en,
+        name_en: selectedSizeInfo.en,
+        name_ar: selectedSizeInfo.ar,
+        price: 0,
+        category: 'size',
+      });
+    }
 
     if (isIcedCoffee && selectedSizeObj) {
       list.push({
@@ -151,7 +184,7 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
 
   const handleConfirm = () => {
     const addons = getSelectedAddonsList();
-    onConfirm(product, quantity, addons);
+    onConfirm(product, quantity, addons, hasSizes ? productSizeKey : undefined);
     onClose();
   };
 
@@ -213,6 +246,67 @@ export const ProductCustomizeModal: React.FC<ProductCustomizeModalProps> = ({
 
         {/* Scrollable Customization Options */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 text-[#2B140E]">
+          {/* 0. PRODUCT SIZE / PIECES SELECTION */}
+          {hasSizes && sizeLabels && (
+            <div className="space-y-2.5 pb-5 border-b border-[#D4AF37]/20">
+              <div className="flex items-center justify-between">
+                <label className="text-xs sm:text-sm font-bold flex items-center gap-2 text-[#2B140E]">
+                  <Layers className="w-4 h-4 text-[#D4AF37]" />
+                  <span>{language === 'ar' ? sizeLabels.sectionTitleAr : sizeLabels.sectionTitleEn}</span>
+                </label>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#8C6212] font-semibold">
+                  {language === 'ar' ? 'حدد الحجم المطلوب' : 'Choose option'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                {/* Small / 12 Pieces */}
+                <button
+                  type="button"
+                  id="product-size-small-btn"
+                  onClick={() => setProductSizeKey('small')}
+                  className={`p-3 sm:p-3.5 min-h-[56px] rounded-2xl border text-center flex flex-col items-center justify-between gap-1 transition-all duration-200 cursor-pointer ${
+                    productSizeKey === 'small'
+                      ? 'bg-[#2B140E] text-[#F7E7A9] border-[#D4AF37] shadow-md ring-2 ring-[#D4AF37]/40'
+                      : 'bg-white text-[#2B140E] border-gray-200 hover:border-[#D4AF37]/50 hover:bg-amber-50/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {productSizeKey === 'small' && <Check className="w-3.5 h-3.5 text-[#D4AF37]" />}
+                    <span className="font-bold text-sm">
+                      {language === 'ar' ? sizeLabels.small.ar : sizeLabels.small.en}
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold font-mono text-[#D4AF37]">
+                    {product.price_small} {t.priceCurrency}
+                  </span>
+                </button>
+
+                {/* Large / 26 Pieces */}
+                <button
+                  type="button"
+                  id="product-size-large-btn"
+                  onClick={() => setProductSizeKey('large')}
+                  className={`p-3 sm:p-3.5 min-h-[56px] rounded-2xl border text-center flex flex-col items-center justify-between gap-1 transition-all duration-200 cursor-pointer ${
+                    productSizeKey === 'large'
+                      ? 'bg-[#2B140E] text-[#F7E7A9] border-[#D4AF37] shadow-md ring-2 ring-[#D4AF37]/40'
+                      : 'bg-white text-[#2B140E] border-gray-200 hover:border-[#D4AF37]/50 hover:bg-amber-50/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {productSizeKey === 'large' && <Check className="w-3.5 h-3.5 text-[#D4AF37]" />}
+                    <span className="font-bold text-sm">
+                      {language === 'ar' ? sizeLabels.large.ar : sizeLabels.large.en}
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold font-mono text-[#D4AF37]">
+                    {product.price_large} {t.priceCurrency}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* 1. SIZE OPTION (ONLY for 'Iced coffee' category) */}
           {isIcedCoffee && (
             <div className="space-y-2.5 pb-5 border-b border-[#D4AF37]/20">

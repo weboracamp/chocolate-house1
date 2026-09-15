@@ -6,6 +6,7 @@ import { CategoryFilter } from './CategoryFilter';
 import { ProductCard } from './ProductCard';
 import { ProductCustomizeModal } from './ProductCustomizeModal';
 import { CategoryType, Product } from '../types';
+import { SizeKey } from '../utils/productSizes';
 import heroPinkDrink from '../assets/images/hero-pink-drink.png';
 import {
   Search,
@@ -29,6 +30,7 @@ export const StoreFront: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<CategoryType | 'all'>('all');
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
+  const [customizingInitialSize, setCustomizingInitialSize] = useState<SizeKey | undefined>(undefined);
 
   const filteredProducts = useMemo(() => {
     const safeProducts = Array.isArray(products) ? products : [];
@@ -175,7 +177,10 @@ export const StoreFront: React.FC = () => {
                   <ProductCard
                     key={product.id}
                     product={product}
-                    onCustomize={setCustomizingProduct}
+                    onCustomize={(prod, size) => {
+                      setCustomizingProduct(prod);
+                      setCustomizingInitialSize(size);
+                    }}
                   />
                 ))}
               </div>
@@ -281,7 +286,10 @@ export const StoreFront: React.FC = () => {
                 <ProductCard
                   key={product.id}
                   product={product}
-                  onCustomize={setCustomizingProduct}
+                  onCustomize={(prod, size) => {
+                    setCustomizingProduct(prod);
+                    setCustomizingInitialSize(size);
+                  }}
                 />
               ))}
             </div>
@@ -325,10 +333,15 @@ export const StoreFront: React.FC = () => {
         <ProductCustomizeModal
           product={customizingProduct}
           isOpen={!!customizingProduct}
-          onClose={() => setCustomizingProduct(null)}
-          onConfirm={(prod, qty, addons) => {
-            addToCart(prod, qty, addons);
+          initialSize={customizingInitialSize}
+          onClose={() => {
             setCustomizingProduct(null);
+            setCustomizingInitialSize(undefined);
+          }}
+          onConfirm={(prod, qty, addons, size) => {
+            addToCart(prod, qty, addons, size);
+            setCustomizingProduct(null);
+            setCustomizingInitialSize(undefined);
           }}
           confirmButtonText={language === 'ar' ? 'تأكيد وإضافة للصينية' : 'Confirm & Add to Tray'}
         />

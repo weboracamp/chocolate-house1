@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { Product, CategoryType, OrderStatus } from '../types';
+import { Product, CategoryType, OrderStatus, SizeLabelType } from '../types';
+import { isPancakesCategory } from '../utils/productSizes';
 import { EXACT_CATEGORIES } from './CategoryFilter';
 import { SUPABASE_SQL_SCHEMA } from '../lib/supabaseSchema';
 import { supabase } from '../lib/supabase';
@@ -107,6 +108,10 @@ export const OwnerDashboard: React.FC = () => {
   const [formStock, setFormStock] = useState('');
   const [formImage, setFormImage] = useState('');
   const [formIsBestSeller, setFormIsBestSeller] = useState(false);
+  const [formHasSizes, setFormHasSizes] = useState(false);
+  const [formPriceSmall, setFormPriceSmall] = useState('');
+  const [formPriceLarge, setFormPriceLarge] = useState('');
+  const [formSizeLabelType, setFormSizeLabelType] = useState<SizeLabelType>('standard');
 
   // Direct Product Image Upload State (Supabase Storage)
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -223,6 +228,10 @@ export const OwnerDashboard: React.FC = () => {
     setFormStock('20');
     setFormImage('');
     setFormIsBestSeller(false);
+    setFormHasSizes(false);
+    setFormPriceSmall('');
+    setFormPriceLarge('');
+    setFormSizeLabelType('standard');
     setUploadError(null);
     setShowUrlInput(false);
     setIsUploadingImage(false);
@@ -241,6 +250,10 @@ export const OwnerDashboard: React.FC = () => {
     setFormStock(p.stock.toString());
     setFormImage(p.image);
     setFormIsBestSeller(Boolean(p.is_best_seller));
+    setFormHasSizes(Boolean(p.has_sizes));
+    setFormPriceSmall(p.price_small != null ? p.price_small.toString() : '');
+    setFormPriceLarge(p.price_large != null ? p.price_large.toString() : '');
+    setFormSizeLabelType(p.size_label_type || (isPancakesCategory(p.category) ? 'pancake_pieces' : 'standard'));
     setUploadError(null);
     setShowUrlInput(false);
     setIsUploadingImage(false);
@@ -348,6 +361,10 @@ export const OwnerDashboard: React.FC = () => {
 
     if (!formNameEn.trim() || !formNameAr.trim() || isNaN(price) || isNaN(stock)) return;
 
+    const priceSmall = formHasSizes ? (parseFloat(formPriceSmall) || price) : undefined;
+    const priceLarge = formHasSizes ? (parseFloat(formPriceLarge) || price) : undefined;
+    const sizeLabelType = formHasSizes ? formSizeLabelType : undefined;
+
     setIsSavingProduct(true);
     let success = false;
     try {
@@ -363,6 +380,10 @@ export const OwnerDashboard: React.FC = () => {
           stock,
           image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
           is_best_seller: formIsBestSeller,
+          has_sizes: formHasSizes,
+          price_small: priceSmall,
+          price_large: priceLarge,
+          size_label_type: sizeLabelType,
         });
       } else {
         success = await addProduct({
@@ -376,6 +397,10 @@ export const OwnerDashboard: React.FC = () => {
           stock,
           image: formImage.trim() || 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80',
           is_best_seller: formIsBestSeller,
+          has_sizes: formHasSizes,
+          price_small: priceSmall,
+          price_large: priceLarge,
+          size_label_type: sizeLabelType,
         });
       }
     } catch (err) {
@@ -971,7 +996,18 @@ export const OwnerDashboard: React.FC = () => {
                             {p.category}
                           </td>
                           <td className="p-3.5">
-                            {hasDiscount ? (
+                            {p.has_sizes ? (
+                              <div>
+                                <span className="font-bold text-[#2B140E] text-xs">
+                                  {p.price_small} / {p.price_large} EGP
+                                </span>
+                                <span className="text-[10px] text-[#8C6212] font-semibold block">
+                                  {p.size_label_type === 'pancake_pieces' || isPancakesCategory(p.category)
+                                    ? '12pc / 26pc'
+                                    : 'Small / Large'}
+                                </span>
+                              </div>
+                            ) : hasDiscount ? (
                               <div>
                                 <span className="font-bold text-[#2B140E]">{p.discount_price} EGP</span>
                                 <span className="text-[10px] text-gray-400 line-through block">{p.price} EGP</span>
@@ -1770,7 +1806,7 @@ export const OwnerDashboard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[#2B140E] block mb-1">
-                    Regular Price (EGP) *
+                    {formHasSizes ? 'Default Price (EGP) *' : 'Regular Price (EGP) *'}
                   </label>
                   <input
                     type="number"
@@ -1790,10 +1826,11 @@ export const OwnerDashboard: React.FC = () => {
                   <input
                     type="number"
                     min="1"
+                    disabled={formHasSizes}
                     value={formDiscountPrice}
                     onChange={(e) => setFormDiscountPrice(e.target.value)}
                     placeholder="85"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono font-bold focus:border-[#D4AF37] focus:outline-hidden"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono font-bold focus:border-[#D4AF37] focus:outline-hidden disabled:bg-gray-100 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -1811,6 +1848,117 @@ export const OwnerDashboard: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono font-bold focus:border-[#D4AF37] focus:outline-hidden"
                   />
                 </div>
+              </div>
+
+              {/* SIZES / PORTIONS SYSTEM TOGGLE */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-[#D4AF37]/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#2B140E] block">
+                      {language === 'ar' ? 'أحجام متعددة للمنتج' : 'Multiple Sizes / Portions'}
+                    </span>
+                    <span className="text-[11px] text-gray-500">
+                      {language === 'ar'
+                        ? (isPancakesCategory(formCategory) || formSizeLabelType === 'pancake_pieces'
+                            ? 'تفعيل خياري: 12 قطعة / 26 قطعة بأسعار منفصلة'
+                            : 'تفعيل خياري: صغير / كبير بأسعار منفصلة')
+                        : (isPancakesCategory(formCategory) || formSizeLabelType === 'pancake_pieces'
+                            ? 'Enable 12 Pieces / 26 Pieces options with separate prices'
+                            : 'Enable Small / Large size options with separate prices')}
+                    </span>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formHasSizes}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        setFormHasSizes(enabled);
+                        if (enabled && !formPriceSmall && formPrice) {
+                          setFormPriceSmall(formPrice);
+                        }
+                        if (enabled && isPancakesCategory(formCategory)) {
+                          setFormSizeLabelType('pancake_pieces');
+                        }
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2B140E]"></div>
+                  </label>
+                </div>
+
+                {formHasSizes && (
+                  <div className="space-y-3 pt-2 border-t border-[#D4AF37]/20">
+                    {/* Option Label Type Selector */}
+                    <div>
+                      <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                        {language === 'ar' ? 'نوع التسمية للأحجام' : 'Size Option Labels'}
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setFormSizeLabelType('standard')}
+                          className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                            formSizeLabelType === 'standard'
+                              ? 'bg-[#2B140E] text-[#F7E7A9] border-[#D4AF37]'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {language === 'ar' ? 'صغير / كبير (Small / Large)' : 'Small / Large'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormSizeLabelType('pancake_pieces')}
+                          className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                            formSizeLabelType === 'pancake_pieces'
+                              ? 'bg-[#2B140E] text-[#F7E7A9] border-[#D4AF37]'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {language === 'ar' ? '12 قطعة / 26 قطعة (بانكيك)' : '12 Pieces / 26 Pieces'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Separate Prices for each size */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                          {formSizeLabelType === 'pancake_pieces'
+                            ? (language === 'ar' ? 'سعر 12 قطعة (ج.م) *' : '12 Pieces Price (EGP) *')
+                            : (language === 'ar' ? 'سعر الحجم الصغير (ج.م) *' : 'Small Size Price (EGP) *')}
+                        </label>
+                        <input
+                          type="number"
+                          required={formHasSizes}
+                          min="1"
+                          value={formPriceSmall}
+                          onChange={(e) => setFormPriceSmall(e.target.value)}
+                          placeholder="e.g. 80"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono font-bold focus:border-[#D4AF37] focus:outline-hidden bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-[#2B140E] block mb-1">
+                          {formSizeLabelType === 'pancake_pieces'
+                            ? (language === 'ar' ? 'سعر 26 قطعة (ج.م) *' : '26 Pieces Price (EGP) *')
+                            : (language === 'ar' ? 'سعر الحجم الكبير (ج.م) *' : 'Large Size Price (EGP) *')}
+                        </label>
+                        <input
+                          type="number"
+                          required={formHasSizes}
+                          min="1"
+                          value={formPriceLarge}
+                          onChange={(e) => setFormPriceLarge(e.target.value)}
+                          placeholder="e.g. 140"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono font-bold focus:border-[#D4AF37] focus:outline-hidden bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* PRODUCT IMAGE: DIRECT DEVICE UPLOAD & SUPABASE STORAGE */}

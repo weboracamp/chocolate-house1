@@ -57,9 +57,19 @@ CREATE TABLE IF NOT EXISTS public.products (
   image TEXT NOT NULL,
   is_best_seller BOOLEAN DEFAULT FALSE,
   is_new BOOLEAN DEFAULT FALSE,
+  has_sizes BOOLEAN DEFAULT FALSE,
+  price_small NUMERIC(10, 2) CHECK (price_small >= 0),
+  price_large NUMERIC(10, 2) CHECK (price_large >= 0),
+  size_label_type TEXT DEFAULT 'standard',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Ensure size columns exist if updating existing database
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS has_sizes BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price_small NUMERIC(10, 2);
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price_large NUMERIC(10, 2);
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size_label_type TEXT DEFAULT 'standard';
 
 -- 4. Shift Reports Table (Cash Drawer Reconciliation)
 CREATE TABLE IF NOT EXISTS public.shift_reports (

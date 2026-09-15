@@ -3,10 +3,15 @@ import { Product, SelectedAddon } from '../types';
 import { useStore } from '../context/StoreContext';
 import { Plus, Minus, Check, Flame, Sparkles, AlertCircle, SlidersHorizontal } from 'lucide-react';
 import { ProductCustomizeModal } from './ProductCustomizeModal';
+import {
+  isProductSizeEnabled,
+  getProductSizeLabels,
+  SizeKey,
+} from '../utils/productSizes';
 
 interface ProductCardProps {
   product: Product;
-  onCustomize?: (product: Product) => void;
+  onCustomize?: (product: Product, selectedSize?: SizeKey) => void;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onCustomize }) => {
@@ -15,11 +20,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onCustomize }
   const [justAdded, setJustAdded] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
 
+  const hasSizes = isProductSizeEnabled(product);
+  const sizeLabels = hasSizes ? getProductSizeLabels(product) : null;
+  const [selectedSize, setSelectedSize] = useState<SizeKey>('small');
+
   const isSoldOut = product.stock <= 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
-  const hasDiscount = product.discount_price && product.discount_price < product.price;
+  const hasDiscount = !hasSizes && Boolean(product.discount_price && product.discount_price < product.price);
 
-  const currentPrice = hasDiscount ? product.discount_price! : product.price;
+  const currentPrice = hasSizes
+    ? (selectedSize === 'large'
+        ? Number(product.price_large) || product.price
+        : Number(product.price_small) || product.price)
+    : (hasDiscount ? product.discount_price! : product.price);
   const originalPrice = product.price;
   const discountPercent = hasDiscount
     ? Math.round(((originalPrice - (product.discount_price || 0)) / originalPrice) * 100)
@@ -28,14 +41,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onCustomize }
   const handleOpenCustomize = () => {
     if (isSoldOut) return;
     if (onCustomize) {
-      onCustomize(product);
+      onCustomize(product, hasSizes ? selectedSize : undefined);
     } else {
       setIsCustomizeOpen(true);
     }
   };
 
-  const handleConfirmCustomize = (prod: Product, qty: number, addons: SelectedAddon[]) => {
-    const success = addToCart(prod, qty, addons);
+  const handleConfirmCustomize = (
+    prod: Product,
+    qty: number,
+    addons: SelectedAddon[],
+    confirmedSize?: SizeKey
+  ) => {
+    const effectiveSize = confirmedSize || (hasSizes ? selectedSize : undefined);
+    const success = addToCart(prod, qty, addons, effectiveSize);
     if (success) {
       setJustAdded(true);
       setTimeout(() => setJustAdded(false), 1200);
@@ -135,6 +154,42 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onCustomize }
             {language === 'ar' ? product.description_ar : product.description_en}
           </p>
         </div>
+
+        {/* Optional Size / Pieces Selector (Only shown if sizes are enabled) */}
+        {hasSizes && sizeLabels && !isSoldOut && (
+          <div className="flex items-center gap-1.5 p-1 bg-[#2B140E]/5 rounded-xl border border-[#D4AF37]/20">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedSize('small');
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all text-center flex items-center justify-center gap-1 cursor-pointer ${
+                selectedSize === 'small'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-xs'
+                  : 'text-[#2B140E]/80 hover:text-[#2B140E] hover:bg-white/60'
+              }`}
+            >
+              <span>{language === 'ar' ? sizeLabels.small.shortAr : sizeLabels.small.shortEn}</span>
+              <span className="text-[10px] opacity-80 font-mono">({product.price_small})</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedSize('large');
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all text-center flex items-center justify-center gap-1 cursor-pointer ${
+                selectedSize === 'large'
+                  ? 'bg-[#2B140E] text-[#F7E7A9] shadow-xs'
+                  : 'text-[#2B140E]/80 hover:text-[#2B140E] hover:bg-white/60'
+              }`}
+            >
+              <span>{language === 'ar' ? sizeLabels.large.shortAr : sizeLabels.large.shortEn}</span>
+              <span className="text-[10px] opacity-80 font-mono">({product.price_large})</span>
+            </button>
+          </div>
+        )}
 
         {/* Price & Add to Cart Controls */}
         <div className="pt-3 border-t border-[#D4AF37]/15 flex items-center justify-between gap-2">

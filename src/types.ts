@@ -44,9 +44,15 @@ export interface Product {
   is_best_seller?: boolean;
   is_new?: boolean;
   calories?: number;
+  has_sizes?: boolean;
+  price_small?: number;
+  price_large?: number;
+  size_label_type?: SizeLabelType;
   created_at?: string;
   updated_at?: string;
 }
+
+export type SizeLabelType = 'standard' | 'pieces' | 'pancake_pieces';
 
 export type OrderType = 'on-site' | 'pickup' | 'delivery';
 
@@ -77,6 +83,7 @@ export interface OrderItem {
   unit_price: number;
   total_price: number;
   image?: string;
+  selected_size?: 'small' | 'large';
   selected_addons?: SelectedAddon[];
   addon_total?: number;
 }

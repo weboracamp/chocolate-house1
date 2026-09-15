@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
 import { OrderStatus, Expense, Product, OrderType, PaymentMethod, SelectedAddon, CashierStaff } from '../types';
+import { isProductSizeEnabled, SizeKey } from '../utils/productSizes';
 import { AuthModal } from './AuthModal';
 import { ProductCustomizeModal } from './ProductCustomizeModal';
 import {
@@ -44,6 +45,7 @@ interface PosCartItem {
   product: Product;
   quantity: number;
   selected_addons?: SelectedAddon[];
+  selected_size?: SizeKey;
   addon_total?: number;
   unit_price: number;
 }
@@ -188,7 +190,11 @@ export const CashierDashboard: React.FC = () => {
   const expectedPhysicalDrawerCash = Math.max(0, cashOrdersSales - totalShiftExpenses);
 
   // POS Helper Functions
-  const handleAddToPosCart = (product: Product, selectedAddons: SelectedAddon[] = []) => {
+  const handleAddToPosCart = (
+    product: Product,
+    selectedAddons: SelectedAddon[] = [],
+    selectedSize?: SizeKey
+  ) => {
     if (product.stock <= 0) {
       showToast(
         language === 'ar' ? 'هذا الصنف غير متوفر حالياً بالمخزون' : 'This item is currently out of stock',
@@ -197,12 +203,22 @@ export const CashierDashboard: React.FC = () => {
       return;
     }
 
-    const basePrice = product.discount_price || product.price;
+    const hasSizes = isProductSizeEnabled(product);
+    let basePrice: number;
+    if (hasSizes && selectedSize) {
+      basePrice = selectedSize === 'large'
+        ? (Number(product.price_large) || product.price)
+        : (Number(product.price_small) || product.price);
+    } else {
+      basePrice = product.discount_price || product.price;
+    }
+
     const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
     const unitPrice = basePrice + addonTotal;
 
     const addonKey = selectedAddons.map((a) => a.id).sort().join('_');
-    const itemId = `${product.id}_${addonKey}`;
+    const sizeKey = selectedSize ? `_${selectedSize}` : '';
+    const itemId = `${product.id}${sizeKey}_${addonKey}`;
 
     setPosCart((prev) => {
       const existing = prev.find((item) => item.id === itemId);
@@ -227,6 +243,7 @@ export const CashierDashboard: React.FC = () => {
           product,
           quantity: 1,
           selected_addons: selectedAddons,
+          selected_size: selectedSize,
           addon_total: addonTotal,
           unit_price: unitPrice,
         },
@@ -313,6 +330,7 @@ export const CashierDashboard: React.FC = () => {
         unit_price: item.unit_price,
         total_price: item.unit_price * item.quantity,
         image: item.product.image,
+        selected_size: item.selected_size,
         selected_addons: item.selected_addons || [],
         addon_total: item.addon_total || 0,
       };
@@ -817,9 +835,15 @@ export const CashierDashboard: React.FC = () => {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (!isOutOfStock) handleAddToPosCart(product);
+                              if (!isOutOfStock) {
+                                if (isProductSizeEnabled(product)) {
+                                  setCustomizingProduct(product);
+                                } else {
+                                  handleAddToPosCart(product);
+                                }
+                              }
                             }}
-                            title={language === 'ar' ? 'إضافة سريعة بدون إضافات' : 'Quick Add Standard'}
+                            title={language === 'ar' ? 'إضافة سريعة' : 'Quick Add'}
                             className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-[#D4AF37]/30 text-[#2B140E] flex items-center justify-center transition-colors"
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -1856,9 +1880,9 @@ export const CashierDashboard: React.FC = () => {
           product={customizingProduct}
           isOpen={!!customizingProduct}
           onClose={() => setCustomizingProduct(null)}
-          onConfirm={(product, quantity, selectedAddons) => {
+          onConfirm={(product, quantity, selectedAddons, selectedSize) => {
             for (let i = 0; i < quantity; i++) {
-              handleAddToPosCart(product, selectedAddons);
+              handleAddToPosCart(product, selectedAddons, selectedSize);
             }
             setCustomizingProduct(null);
           }}
