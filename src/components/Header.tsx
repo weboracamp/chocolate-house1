@@ -144,22 +144,6 @@ export const Header: React.FC = () => {
               </button>
             );
           })}
-
-          {/* Quick Staff & Owner Navigation inside Mobile Menu */}
-          <div className="pt-2 mt-2 border-t border-[#D4AF37]/15 flex items-center gap-2">
-            <button
-              onClick={() => handleNavClick('cashier')}
-              className="flex-1 min-h-[44px] py-2 px-3 rounded-xl text-xs font-bold text-center bg-white/5 hover:bg-white/10 text-[#F7E7A9] border border-[#D4AF37]/30 transition-colors"
-            >
-              {t.cashierPortal}
-            </button>
-            <button
-              onClick={() => handleNavClick('owner')}
-              className="flex-1 min-h-[44px] py-2 px-3 rounded-xl text-xs font-bold text-center bg-white/5 hover:bg-white/10 text-[#F7E7A9] border border-[#D4AF37]/30 transition-colors"
-            >
-              {t.ownerPortal}
-            </button>
-          </div>
         </div>
       )}
     </header>

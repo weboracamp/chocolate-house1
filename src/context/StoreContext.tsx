@@ -1567,9 +1567,59 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateOrderStatus = (orderId: string, status: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status } : o))
-    );
+    const targetOrder = orders.find((o) => o.id === orderId);
+
+    if (targetOrder && targetOrder.status !== status) {
+      const wasCancelled = targetOrder.status === 'cancelled';
+      const isNowCancelled = status === 'cancelled';
+      const wasRestored = Boolean(targetOrder.stock_restored);
+
+      // 1. If cancelling an active order and stock hasn't been restored yet:
+      // Increment product stock by item quantity
+      if (isNowCancelled && !wasRestored) {
+        setProducts((prev) =>
+          prev.map((prod) => {
+            const item = targetOrder.items?.find((i) => i.product_id === prod.id);
+            if (item) {
+              return { ...prod, stock: prod.stock + item.quantity };
+            }
+            return prod;
+          })
+        );
+        invalidateCache('products');
+      }
+      // 2. If un-cancelling an order back to active and stock was previously restored:
+      // Re-decrement product stock by item quantity
+      else if (wasCancelled && !isNowCancelled && wasRestored) {
+        setProducts((prev) =>
+          prev.map((prod) => {
+            const item = targetOrder.items?.find((i) => i.product_id === prod.id);
+            if (item) {
+              return { ...prod, stock: Math.max(0, prod.stock - item.quantity) };
+            }
+            return prod;
+          })
+        );
+        invalidateCache('products');
+      }
+
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id === orderId) {
+            let nextStockRestored = o.stock_restored;
+            if (isNowCancelled && !wasRestored) nextStockRestored = true;
+            if (wasCancelled && !isNowCancelled && wasRestored) nextStockRestored = false;
+            return { ...o, status, stock_restored: nextStockRestored };
+          }
+          return o;
+        })
+      );
+    } else {
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status } : o))
+      );
+    }
+
     invalidateCache('orders');
     if (supabase) {
       supabase

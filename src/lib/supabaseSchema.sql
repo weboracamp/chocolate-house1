@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   shift_id TEXT REFERENCES public.shift_reports(id) ON DELETE SET NULL,
   staff_name TEXT,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  stock_restored BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -191,6 +192,58 @@ CREATE TRIGGER on_order_item_created
   AFTER INSERT ON public.order_items
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_order_stock_decrement();
+
+-- ==============================================================================
+-- AUTOMATIC STOCK RESTORATION / RE-DECREMENT ON ORDER STATUS CHANGE
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.handle_order_status_stock_sync()
+RETURNS TRIGGER AS $$
+DECLARE
+  item RECORD;
+BEGIN
+  -- Case 1: Order status changed to 'cancelled' from an active status
+  -- Idempotency check: only restore stock if stock_restored is currently FALSE
+  IF NEW.status = 'cancelled' AND OLD.status != 'cancelled' AND COALESCE(OLD.stock_restored, FALSE) = FALSE THEN
+    FOR item IN
+      SELECT product_id, quantity
+      FROM public.order_items
+      WHERE order_id = NEW.id AND product_id IS NOT NULL
+    LOOP
+      UPDATE public.products
+      SET stock = stock + item.quantity,
+          updated_at = timezone('utc'::text, now())
+      WHERE id = item.product_id;
+    END LOOP;
+
+    NEW.stock_restored := TRUE;
+
+  -- Case 2: Order status changed FROM 'cancelled' back to an active status (un-cancelled)
+  -- Idempotency check: only re-decrement stock if stock was previously restored
+  ELSIF OLD.status = 'cancelled' AND NEW.status != 'cancelled' AND COALESCE(OLD.stock_restored, FALSE) = TRUE THEN
+    FOR item IN
+      SELECT product_id, quantity
+      FROM public.order_items
+      WHERE order_id = NEW.id AND product_id IS NOT NULL
+    LOOP
+      UPDATE public.products
+      SET stock = GREATEST(0, stock - item.quantity),
+          updated_at = timezone('utc'::text, now())
+      WHERE id = item.product_id;
+    END LOOP;
+
+    NEW.stock_restored := FALSE;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_order_status_stock_sync ON public.orders;
+CREATE TRIGGER on_order_status_stock_sync
+  BEFORE UPDATE OF status ON public.orders
+  FOR EACH ROW
+  WHEN (OLD.status IS DISTINCT FROM NEW.status)
+  EXECUTE FUNCTION public.handle_order_status_stock_sync();
 
 -- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES

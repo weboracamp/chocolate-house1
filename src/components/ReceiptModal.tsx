@@ -1,292 +1,334 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../context/StoreContext';
 import { Logo } from './Logo';
-import { X, Printer, CheckCircle2, MapPin } from 'lucide-react';
-
-const RECEIPT_PRINT_ROOT_ID = 'receipt-print-root';
-
-function mountReceiptPrintClone(): void {
-  const source = document.getElementById('thermal-receipt-content');
-  document.getElementById(RECEIPT_PRINT_ROOT_ID)?.remove();
-  if (!source) return;
-  const root = document.createElement('div');
-  root.id = RECEIPT_PRINT_ROOT_ID;
-  root.appendChild(source.cloneNode(true));
-  document.body.appendChild(root);
-}
-
-function unmountReceiptPrintClone(): void {
-  document.getElementById(RECEIPT_PRINT_ROOT_ID)?.remove();
-}
+import {
+  Printer,
+  X,
+  CheckCircle2,
+  Clock,
+  User,
+  Phone,
+  MapPin,
+  CreditCard,
+  Banknote,
+  Share2,
+  Check,
+  Store,
+  Truck,
+  FileText,
+  Sparkles,
+} from 'lucide-react';
 
 export const ReceiptModal: React.FC = () => {
-  const { language, t, activeReceiptOrder, setActiveReceiptOrder } = useStore();
+  const {
+    activeReceiptOrder,
+    setActiveReceiptOrder,
+    siteConfig,
+    language,
+    t,
+  } = useStore();
 
+  const [copied, setCopied] = useState(false);
+  const [printContainer, setPrintContainer] = useState<HTMLElement | null>(null);
+
+  // Setup/tear down thermal print root in DOM
   useEffect(() => {
-    const onBeforePrint = () => mountReceiptPrintClone();
-    const onAfterPrint = () => unmountReceiptPrintClone();
-    window.addEventListener('beforeprint', onBeforePrint);
-    window.addEventListener('afterprint', onAfterPrint);
-    return () => {
-      window.removeEventListener('beforeprint', onBeforePrint);
-      window.removeEventListener('afterprint', onAfterPrint);
-      unmountReceiptPrintClone();
-    };
-  }, [activeReceiptOrder]);
+    let el = document.getElementById('receipt-print-root');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'receipt-print-root';
+      document.body.appendChild(el);
+    }
+    setPrintContainer(el);
 
-  const handlePrint = useCallback(() => {
-    mountReceiptPrintClone();
-    window.print();
-    window.setTimeout(unmountReceiptPrintClone, 500);
+    return () => {
+      // Keep element or clean up if needed
+    };
   }, []);
 
   if (!activeReceiptOrder) return null;
 
   const order = activeReceiptOrder;
+  const isArabic = language === 'ar';
+  const isDigital = order.payment_method === 'instapay_wallet';
 
-  // 1. Google Maps Store Location URL for QR Code generation (Exact URL requested)
-  const storeGoogleMapsUrl = 'https://maps.app.goo.gl/AxWMKsKdfzpvW4gv5?g_st=ic';
-  // Generates 150x150 QR code directly encoding the exact Google Maps URL
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=4&data=${encodeURIComponent(storeGoogleMapsUrl)}`;
+  const orderDate = new Date(order.created_at || Date.now());
+  const formattedDate = orderDate.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  const formattedTime = orderDate.toLocaleTimeString(isArabic ? 'ar-EG' : 'en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleCopySummary = () => {
+    const itemsText = order.items
+      .map(
+        (item) =>
+          `• ${item.quantity}x ${isArabic ? item.product_name_ar : item.product_name_en} - ${item.total_price} EGP` +
+          (item.selected_addons && item.selected_addons.length > 0
+            ? ` (${item.selected_addons.map((a) => (isArabic ? a.name_ar : a.name_en)).join(', ')})`
+            : '')
+      )
+      .join('\n');
+
+    const summary = `🧾 *Chocolate House - شوكلت هاوس*
+رقم الطلب: ${order.order_number}
+نوع الطلب: ${
+      order.order_type === 'on-site'
+        ? 'صالة (داخل الكافيه)'
+        : order.order_type === 'pickup'
+        ? 'استلام من الفرع'
+        : 'توصيل'
+    }
+العميل: ${order.customer_name} (${order.customer_phone})
+${order.table_number ? `طاولة: ${order.table_number}\n` : ''}${
+      order.delivery_address ? `العنوان: ${order.delivery_address}\n` : ''
+    }
+الطلبات:
+${itemsText}
+
+الإجمالي: ${order.total} EGP
+طريقة الدفع: ${isDigital ? 'إنستاباي / محفظة' : 'الدفع عند الاستلام (كاش)'}
+التاريخ: ${formattedDate} ${formattedTime}`;
+
+    navigator.clipboard.writeText(summary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Thermal receipt content (used both for 80mm print & visual ticket)
+  const renderThermalReceiptContent = () => (
+    <div id="thermal-receipt-content" className="receipt-print-area font-mono text-black">
+      {/* Receipt Header */}
+      <div className="text-center pb-2 mb-2 border-b border-dashed border-gray-400">
+        <h2 className="text-base font-black tracking-wider uppercase">CHOCOLATE HOUSE</h2>
+        <p className="text-xs font-bold">شوكلت هاوس - كافيه & حلويات</p>
+        <p className="text-[10px] mt-0.5">{siteConfig.address_ar || 'الحوامدية - الجيزة'}</p>
+        <p className="text-[10px]">هاتف: {siteConfig.phone}</p>
+      </div>
+
+      {/* Ticket Details */}
+      <div className="text-[10px] space-y-0.5 pb-2 mb-2 border-b border-dashed border-gray-400">
+        <div className="flex justify-between font-bold text-xs">
+          <span>{isArabic ? 'رقم الفاتورة:' : 'Order #:'}</span>
+          <span className="font-mono">{order.order_number}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>{isArabic ? 'التاريخ والوقت:' : 'Date & Time:'}</span>
+          <span>{formattedDate} {formattedTime}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>{isArabic ? 'نوع الطلب:' : 'Order Type:'}</span>
+          <span className="font-bold">
+            {order.order_type === 'on-site'
+              ? isArabic ? 'صالة (طاولة)' : 'On-Site Dine-In'
+              : order.order_type === 'pickup'
+              ? isArabic ? 'استلام (تيك أواي)' : 'Takeaway / Pickup'
+              : isArabic ? 'توصيل دليفري' : 'Delivery'}
+          </span>
+        </div>
+        {order.staff_name && (
+          <div className="flex justify-between">
+            <span>{isArabic ? 'الكاشير:' : 'Cashier:'}</span>
+            <span>{order.staff_name}</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span>{isArabic ? 'العميل:' : 'Customer:'}</span>
+          <span className="font-bold">{order.customer_name}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>{isArabic ? 'الهاتف:' : 'Phone:'}</span>
+          <span>{order.customer_phone}</span>
+        </div>
+        {order.table_number && (
+          <div className="flex justify-between font-bold">
+            <span>{isArabic ? 'رقم الطاولة:' : 'Table #:'}</span>
+            <span>{order.table_number}</span>
+          </div>
+        )}
+        {order.delivery_address && (
+          <div className="pt-0.5">
+            <span className="block font-bold">{isArabic ? 'عنوان التوصيل:' : 'Address:'}</span>
+            <span className="block text-[9px]">{order.delivery_address}</span>
+          </div>
+        )}
+        {order.pickup_time && (
+          <div className="flex justify-between">
+            <span>{isArabic ? 'وقت الاستلام:' : 'Pickup Time:'}</span>
+            <span>{order.pickup_time}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Items List */}
+      <div className="pb-2 mb-2 border-b border-dashed border-gray-400">
+        <div className="flex justify-between text-[10px] font-bold pb-1 border-b border-gray-300">
+          <span>{isArabic ? 'الصنف' : 'Item'}</span>
+          <span>{isArabic ? 'الإجمالي' : 'Total'}</span>
+        </div>
+        <div className="space-y-1.5 pt-1.5">
+          {order.items.map((item, idx) => (
+            <div key={idx} className="text-[10px]">
+              <div className="flex justify-between items-start">
+                <span className="font-semibold leading-tight flex-1">
+                  {item.quantity}x {isArabic ? item.product_name_ar : item.product_name_en}
+                </span>
+                <span className="font-mono font-bold shrink-0 ml-2">
+                  {item.total_price} EGP
+                </span>
+              </div>
+              {item.selected_addons && item.selected_addons.length > 0 && (
+                <div className="text-[9px] text-gray-600 pl-3">
+                  {item.selected_addons.map((a) => `+${isArabic ? a.name_ar : a.name_en}`).join(', ')}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Totals */}
+      <div className="text-[10px] space-y-0.5 pb-2 mb-2 border-b border-dashed border-gray-400">
+        <div className="flex justify-between">
+          <span>{isArabic ? 'المجموع الفرعي:' : 'Subtotal:'}</span>
+          <span className="font-mono">{order.subtotal} EGP</span>
+        </div>
+        {order.delivery_fee > 0 && (
+          <div className="flex justify-between">
+            <span>{isArabic ? 'رسوم التوصيل:' : 'Delivery Fee:'}</span>
+            <span className="font-mono">{order.delivery_fee} EGP</span>
+          </div>
+        )}
+        {order.discount_total > 0 && (
+          <div className="flex justify-between text-emerald-800">
+            <span>{isArabic ? 'الخصم:' : 'Discount:'}</span>
+            <span className="font-mono">-{order.discount_total} EGP</span>
+          </div>
+        )}
+        <div className="flex justify-between text-xs font-black pt-1 border-t border-gray-300">
+          <span>{isArabic ? 'الإجمالي النهائي:' : 'TOTAL:'}</span>
+          <span className="font-mono">{order.total} EGP</span>
+        </div>
+      </div>
+
+      {/* Payment info & Footer */}
+      <div className="text-[9px] space-y-1 text-center">
+        <p className="font-bold">
+          {isArabic ? 'طريقة الدفع:' : 'Payment:'}{' '}
+          {isDigital
+            ? isArabic
+              ? `إنستاباي / محفظة (${order.transfer_from_phone || 'تم التحويل'})`
+              : `InstaPay / Wallet (${order.transfer_from_phone || 'Verified'})`
+            : isArabic
+            ? 'نقداً عند الاستلام (كاش)'
+            : 'Cash on Arrival (COD)'}
+        </p>
+        {order.notes && (
+          <p className="italic text-[9px] text-gray-700">
+            {isArabic ? 'ملاحظة:' : 'Note:'} {order.notes}
+          </p>
+        )}
+        <div className="pt-2 border-t border-dashed border-gray-400">
+          <p className="font-bold">{siteConfig.tagline_ar || 'شكراً لزيارتكم شوكلت هاوس'}</p>
+          <p className="text-[8px] text-gray-600 mt-0.5">Thank you for choosing Chocolate House</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div
-      id="thermal-receipt-modal"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 no-print"
-    >
-      <div className="relative w-full max-w-[95vw] sm:max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/30 my-4 sm:my-8 no-print-chrome max-h-[92vh] flex flex-col">
-        {/* Top bar (Hidden when printing via .print:hidden) */}
-        <div className="p-3.5 sm:p-4 bg-[#2B140E] text-white flex items-center justify-between print:hidden shrink-0">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-[#D4AF37]" />
-            <span className="font-bold text-xs sm:text-sm text-[#F7E7A9]">
-              {t.orderSuccessTitle}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
+    <>
+      {/* 80mm Print Portal for thermal printer */}
+      {printContainer && createPortal(renderThermalReceiptContent(), printContainer)}
+
+      {/* Screen Modal Dialog */}
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:hidden">
+        <div className="relative w-full max-w-md bg-[#FFFBF5] rounded-3xl shadow-2xl overflow-hidden border border-[#D4AF37]/40 my-4">
+          {/* Header Banner */}
+          <div
+            className="p-4 text-white relative flex items-center justify-between"
+            style={{
+              background: 'linear-gradient(135deg, #1A0A06 0%, #2B140E 50%, #442217 100%)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-2xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37]">
+                <CheckCircle2 className="w-6 h-6 text-[#D4AF37]" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-[#F7E7A9]">
+                  {t.orderSuccessTitle || (isArabic ? 'تم تأكيد الطلب بنجاح' : 'Order Confirmed')}
+                </h3>
+                <p className="text-xs text-[#F7E7A9]/75 font-mono">
+                  {order.order_number}
+                </p>
+              </div>
+            </div>
+
             <button
-              onClick={handlePrint}
-              id="print-receipt-btn"
-              className="px-3 py-1.5 min-h-[36px] rounded-lg bg-[#D4AF37] text-[#1A0A06] font-bold text-xs flex items-center gap-1.5 hover:bg-[#F7E7A9] transition-colors shadow-xs active:scale-95"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>{t.printReceipt}</span>
-            </button>
-            <button
+              type="button"
               onClick={() => setActiveReceiptOrder(null)}
-              className="p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
-              aria-label="Close receipt"
+              className="p-1.5 rounded-full hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-        </div>
 
-        {/* 80mm THERMAL PRINTABLE RECEIPT CONTENT */}
-        <div
-          id="thermal-receipt-content"
-          className="receipt-print-area p-4 sm:p-6 text-black bg-white font-mono text-xs space-y-4 overflow-y-auto"
-        >
-          {/* Receipt Header */}
-          <div className="text-center space-y-1.5 border-b border-dashed border-gray-400 pb-4">
-            <div className="flex justify-center pb-1">
-              <Logo size="sm" />
+          {/* Body Content */}
+          <div className="p-4 sm:p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            {/* Visual Thermal Receipt Card */}
+            <div className="p-4 rounded-2xl bg-white border border-[#D4AF37]/30 shadow-xs relative">
+              <div className="absolute top-2 right-2 flex items-center gap-1 text-[10px] font-bold text-[#8C6212] bg-[#FFFBF5] px-2 py-0.5 rounded-full border border-[#D4AF37]/30">
+                <Sparkles className="w-2.5 h-2.5 text-[#D4AF37]" />
+                <span>80mm Thermal</span>
+              </div>
+              {renderThermalReceiptContent()}
             </div>
-            <h1 className="text-sm sm:text-base font-black tracking-wider uppercase">
-              Chocolate House - شوكلت هاوس
-            </h1>
-            <p className="text-[10px] text-gray-700">
-              Salah Salem ST, Al Hawamdeya Giza
-            </p>
-            <p className="text-[10px] text-gray-700 break-words">
-              Tel: 01112437437 | InstaPay: 01113116242 (ahmed_emam_1@instapay)
-            </p>
-            <div className="pt-2 text-xs font-bold">
-              <span>{t.orderNumber}: </span>
-              <span className="text-sm">{order.order_number}</span>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="py-3 px-4 rounded-2xl text-xs font-black shadow-md flex items-center justify-center gap-2 text-[#1A0A06] transition-transform active:scale-98"
+                style={{
+                  background: 'linear-gradient(135deg, #D4AF37 0%, #B8911F 100%)',
+                }}
+              >
+                <Printer className="w-4 h-4" />
+                <span>{t.printReceipt || (isArabic ? 'طباعة الإيصال' : 'Print Receipt')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopySummary}
+                className="py-3 px-4 rounded-2xl text-xs font-bold border border-[#D4AF37]/50 bg-white hover:bg-[#FFFBF5] text-[#2B140E] flex items-center justify-center gap-2 transition-colors"
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Share2 className="w-4 h-4 text-[#8C6212]" />}
+                <span>{copied ? (isArabic ? 'تم النسخ!' : 'Copied!') : (isArabic ? 'نسخ ملخص الطلب' : 'Copy Summary')}</span>
+              </button>
             </div>
-            <p className="text-[10px] text-gray-600">
-              {new Date(order.created_at).toLocaleString()}
-            </p>
+
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setActiveReceiptOrder(null)}
+              className="w-full py-2.5 rounded-xl text-xs font-bold text-gray-600 hover:text-[#2B140E] hover:bg-gray-100 transition-colors text-center"
+            >
+              {t.continueShopping || (isArabic ? 'العودة للتسوق' : 'Close & Back')}
+            </button>
           </div>
-
-          {/* Customer & Order Metadata */}
-          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3">
-            <div className="flex justify-between">
-              <span className="font-semibold">{t.orderType}:</span>
-              <span className="font-bold uppercase">
-                {order.order_type === 'on-site'
-                  ? t.onSite
-                  : order.order_type === 'pickup'
-                  ? t.pickup
-                  : t.delivery}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-semibold">{t.customerName}:</span>
-              <span>{order.customer_name}</span>
-            </div>
-            {order.customer_phone && (
-              <div className="flex justify-between">
-                <span className="font-semibold">{t.customerPhone}:</span>
-                <span>{order.customer_phone}</span>
-              </div>
-            )}
-            {order.staff_name && (
-              <div className="flex justify-between text-[#2B140E]">
-                <span className="font-semibold">{language === 'ar' ? 'الكاشير المسؤول:' : 'Cashier / Staff:'}</span>
-                <span className="font-bold">{order.staff_name}</span>
-              </div>
-            )}
-            {order.table_number && (
-              <div className="flex justify-between">
-                <span className="font-semibold">{t.tableNumber}:</span>
-                <span className="font-bold">{order.table_number}</span>
-              </div>
-            )}
-            {order.pickup_time && (
-              <div className="flex justify-between">
-                <span className="font-semibold">{t.pickupTime}:</span>
-                <span>{order.pickup_time}</span>
-              </div>
-            )}
-            {order.delivery_address && (
-              <div className="pt-1">
-                <span className="font-semibold block">{t.deliveryAddress}:</span>
-                <span className="text-[10px] text-gray-800">{order.delivery_address}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Itemized Table */}
-          <div className="space-y-2 border-b border-dashed border-gray-400 pb-3">
-            <div className="flex justify-between font-bold text-[10px] uppercase text-gray-600">
-              <span>Item / Qty</span>
-              <span>Price</span>
-            </div>
-
-            {order.items.map((item, idx) => (
-              <div key={idx} className="space-y-0.5 border-b border-gray-100 last:border-0 pb-1.5 pt-1">
-                <div className="flex justify-between items-start text-xs">
-                  <div className="flex-1 pr-2">
-                    <span className="font-bold block">
-                      {language === 'ar' ? item.product_name_ar : item.product_name_en}
-                    </span>
-                    <span className="text-[10px] text-gray-500">
-                      {item.quantity} × {item.unit_price} EGP
-                    </span>
-                  </div>
-                  <span className="font-bold text-right shrink-0">
-                    {item.total_price} EGP
-                  </span>
-                </div>
-
-                {/* Add-ons list on receipt */}
-                {item.selected_addons && item.selected_addons.length > 0 && (
-                  <div className="text-[10px] text-gray-600 pl-2 space-y-0.5 font-mono">
-                    {item.selected_addons.map((addon, aIdx) => (
-                      <div key={aIdx} className="flex justify-between">
-                        <span>
-                          ↳ {language === 'ar' ? addon.name_ar : addon.name_en}
-                        </span>
-                        {addon.price > 0 && <span>+{addon.price} EGP</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Totals Breakdown */}
-          <div className="space-y-1 text-xs border-b border-dashed border-gray-400 pb-3">
-            <div className="flex justify-between">
-              <span>{t.subtotal}:</span>
-              <span>{order.subtotal} EGP</span>
-            </div>
-            {order.delivery_fee > 0 && (
-              <div className="flex justify-between">
-                <span>{t.deliveryFee}:</span>
-                <span>{order.delivery_fee} EGP</span>
-              </div>
-            )}
-            {order.discount_total > 0 && (
-              <div className="flex justify-between text-gray-700">
-                <span>{t.discountTotal}:</span>
-                <span>-{order.discount_total} EGP</span>
-              </div>
-            )}
-            <div className="flex justify-between font-black text-sm pt-1 border-t border-gray-300">
-              <span>{t.total}:</span>
-              <span className="text-base">{order.total} EGP</span>
-            </div>
-          </div>
-
-          {/* Payment Method & Verification */}
-          <div className="space-y-1 text-[11px] border-b border-dashed border-gray-400 pb-3">
-            <div className="flex justify-between">
-              <span className="font-semibold">{t.paymentMethod}:</span>
-              <span className="font-bold">
-                {order.payment_method === 'cod' ? 'CASH ON ARRIVAL' : 'INSTAPAY / WALLET'}
-              </span>
-            </div>
-
-            {order.payment_method === 'instapay_wallet' && (
-              <div className="p-2 bg-gray-100 rounded text-[10px] space-y-0.5">
-                <div className="flex justify-between">
-                  <span>Sender Phone:</span>
-                  <span className="font-bold">{order.transfer_from_phone || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Amount Transferred:</span>
-                  <span className="font-bold">{order.amount_transferred || order.total} EGP</span>
-                </div>
-              </div>
-            )}
-
-            {order.notes && (
-              <div className="pt-1 text-[10px] text-gray-600">
-                <strong>Notes: </strong> {order.notes}
-              </div>
-            )}
-          </div>
-
-          {/* Functional Google Maps Location QR Code & Footer */}
-          <div className="text-center pt-2 space-y-2">
-            <div className="flex flex-col items-center justify-center space-y-1">
-              <img
-                src={qrCodeUrl}
-                alt="Store Location QR Code - Google Maps"
-                className="w-24 h-24 sm:w-28 sm:h-28 mx-auto border border-gray-300 p-1 bg-white rounded-md"
-                referrerPolicy="no-referrer"
-              />
-              <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-gray-800 pt-1">
-                <MapPin className="w-3 h-3 text-red-600 shrink-0 print:hidden" />
-                <span>Scan for Google Maps Location</span>
-              </div>
-              <p className="text-[9px] text-gray-500" dir="rtl">
-                امسح الكود لفتح موقع الفرع في خرائط جوجل
-              </p>
-            </div>
-            <p className="text-[11px] font-bold pt-1">
-              Thank you for visiting Chocolate House!
-            </p>
-            <p className="text-[10px] text-gray-500" dir="rtl">
-              شكراً لاختياركم شوكلت هاوس - الحوامدية
-            </p>
-          </div>
-        </div>
-
-        {/* Action Button (Hidden when printing) */}
-        <div className="p-4 bg-gray-50 border-t flex items-center justify-end gap-2 print:hidden">
-          <button
-            onClick={() => setActiveReceiptOrder(null)}
-            className="w-full py-2.5 rounded-xl font-bold text-xs bg-[#2B140E] text-[#F7E7A9] hover:bg-[#1A0A06] transition-colors"
-          >
-            {t.close}
-          </button>
         </div>
       </div>
-    </div>
+    </>
   );
 };

@@ -104,6 +104,7 @@ export interface Order {
   created_at: string;
   shift_id?: string;
   is_archived?: boolean;
+  stock_restored?: boolean;
 }
 
 export interface Expense {
